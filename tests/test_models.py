@@ -1,3 +1,5 @@
+"""Node, Task and Tenant data objects (AC1)."""
+
 from edgefogsim.models import Node
 
 
@@ -8,6 +10,7 @@ def test_default_nodes_one_per_tier_and_idle(settings):
 
 
 def test_node_free_capacity_and_utilisation():
+    """Free capacity and utilisation are derived from usage."""
     node = Node("edge-1", "edge", cpu_cores=4, memory_gb=8, base_latency_ms=5, speed_factor=0.6,
                 cpu_used=3, memory_used=2)
     assert node.free_cpu == 1

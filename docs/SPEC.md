@@ -371,7 +371,7 @@ Each phase ends with a runnable app you can test by hand, plus green tests. Bran
 
 Phase 7 is a stretch goal. It starts only after Phase 6 is merged, so the required deliverables are never at risk; if there's time it can land before the report is finalised.
 
-**PR checklist (every phase):** tests green · README run instructions updated · ACs ticked in the PR description · manual-test steps listed so the reviewer can repeat them · no generated `results/` files committed except the final evidence pack in Phase 6.
+**PR checklist (every phase):** tests green (including the docstring check) · every new module, class and function has a docstring (Google style: Args / Returns / Raises) · README run instructions updated · ACs ticked in the PR description · manual-test steps listed so the reviewer can repeat them · no generated `results/` files committed except the final evidence pack in Phase 6.
 
 ---
 

@@ -1,4 +1,9 @@
-"""Command-line entry point: ``python -m edgefogsim``."""
+"""Command-line entry point: ``python -m edgefogsim [menu|run] [options]``.
+
+Parses options, turns them into setting overrides, loads and validates the
+settings, then starts the chosen command. With no command, the menu starts.
+A settings error prints one clear line and exits with status 2.
+"""
 
 import argparse
 import sys
@@ -8,9 +13,18 @@ from edgefogsim.config import ConfigError, load_settings, parse_value
 from edgefogsim.workload import load_tasks
 
 COMMANDS = ("menu", "run")
+"""Sub-commands; ``menu`` is assumed when none is given."""
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser.
+
+    Options shared by every command (settings files and overrides) live on a
+    parent parser, so ``menu --seed 7`` and ``run --seed 7`` both work.
+
+    Returns:
+        The configured parser.
+    """
     parser = argparse.ArgumentParser(
         prog="edgefogsim",
         description="Simulate placing computing tasks on Edge, Fog and Cloud nodes.",
@@ -44,7 +58,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def collect_overrides(args: argparse.Namespace) -> dict:
-    """Turn command-line flags into dotted setting overrides."""
+    """Turn command-line flags into dotted setting overrides.
+
+    Args:
+        args: Parsed arguments from :func:`build_parser`.
+
+    Returns:
+        Dotted path -> value, e.g. ``{"generator.seed": 7, "qos.deadlines_ms.high": 40}``.
+        ``--tasks N`` sets ``generator.count``; ``--tasks FILE`` is handled by :func:`main`.
+
+    Raises:
+        ConfigError: If a ``--set`` item is not ``KEY=VALUE``.
+    """
     overrides = {}
     if args.seed is not None:
         overrides["generator.seed"] = args.seed
@@ -64,6 +89,14 @@ def collect_overrides(args: argparse.Namespace) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the program.
+
+    Args:
+        argv: Arguments without the program name; defaults to ``sys.argv[1:]``.
+
+    Returns:
+        Exit status: 0 on success, 2 on a settings or task-file error.
+    """
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or (argv[0] not in COMMANDS and argv[0] not in ("-h", "--help", "--version")):
         argv.insert(0, "menu")
