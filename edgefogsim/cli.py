@@ -6,13 +6,12 @@ tables. Input goes through an ``ask`` function, so tests can script a whole
 session (see ``tests/test_cli.py``).
 """
 
-from pathlib import Path
 from typing import Callable
 
 from rich.console import Console
 from rich.table import Table
 
-from edgefogsim.config import ConfigError, Settings, origin_of, parse_value, save_settings, set_value
+from edgefogsim.config import ConfigError, Settings, describe_settings, parse_value, save_settings, set_value
 from edgefogsim.models import Task, Tenant
 from edgefogsim.workload import generate_tasks, load_tasks, make_task
 
@@ -170,8 +169,8 @@ class App:
         table.add_column("Setting", no_wrap=True)
         table.add_column("Value")
         table.add_column("From", style="dim")
-        for path, value in _flatten(self.settings.simulation):
-            table.add_row(path, str(value), _source(self.settings.origins, path))
+        for path, value, source in describe_settings(self.settings):
+            table.add_row(path, str(value), source)
         self.console.print(table)
         self.console.print("[dim]Change any of these with option 7, a --config file, or --set KEY=VALUE.[/dim]")
 
@@ -208,19 +207,3 @@ class App:
 def _fmt(value: float) -> str:
     """Format a number compactly: 4.0 -> "4", 0.5 -> "0.5"."""
     return f"{value:g}"
-
-
-def _flatten(data: dict, prefix: str = ""):
-    """Yield ``(dotted path, value)`` for every leaf setting in a nested dict."""
-    for key, value in data.items():
-        path = f"{prefix}{key}"
-        if isinstance(value, dict) and value:
-            yield from _flatten(value, f"{path}.")
-        else:
-            yield path, value
-
-
-def _source(origins: dict[str, str], path: str) -> str:
-    """Where a setting came from, shortening file paths to the file name."""
-    source = origin_of(origins, path)
-    return Path(source).name if "/" in source else source

@@ -377,9 +377,9 @@ Each one is written to `results/experiments.md` with setup, expected, actual and
 
 ---
 
-## 9. Delivery phases — one branch and one PR each
+## 9. Delivery phases
 
-Each phase ends with a runnable app you can test by hand, plus green tests. Branch off `main`, open a PR, review, merge, then start the next phase from the updated `main`.
+Each phase ends with a runnable app and green tests. At the end of a phase the changes are left uncommitted and handed over with exact test commands and manual steps; the team tests by hand and commits. (Phases 0 and 1 used one branch and PR each; the branch names below are suggestions.)
 
 | Phase | Branch | Scope | Your manual test at the end | ACs |
 |-------|--------|-------|-----------------------------|-----|
@@ -397,7 +397,7 @@ From Phase 2 on, every phase adds its feature to **both** the menu and the Strea
 
 Phase 7 is a stretch goal. It starts only after Phase 6 is merged, so the required deliverables are never at risk; if there's time it can land before the report is finalised.
 
-**PR checklist (every phase):** tests green (including the docstring check) · every new module, class and function has a docstring (Google style: Args / Returns / Raises) · README run instructions updated · ACs ticked in the PR description · manual-test steps listed so the reviewer can repeat them · no generated `results/` files committed except the final evidence pack in Phase 6.
+**Hand-over checklist (every phase):** tests green (including the docstring check) · every new module, class and function has a docstring (Google style: Args / Returns / Raises) · README run instructions updated · ACs covered listed in the hand-over · manual-test steps listed so anyone can repeat them · no generated `results/` files committed except the final evidence pack in Phase 6.
 
 ---
 

@@ -261,14 +261,53 @@ def save_settings(settings: Settings, path: Path | str) -> Path:
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(settings_as_json(settings))
+    return path
+
+
+def settings_as_json(settings: Settings) -> str:
+    """Serialise settings in the ``--config`` file format.
+
+    Args:
+        settings: The settings to serialise.
+
+    Returns:
+        Indented JSON text with the simulation settings, ``nodes``, ``tenants``
+        and an informational ``sources`` list.
+    """
     data = {
         **settings.simulation,
         "nodes": [_node_definition(n) for n in settings.nodes],
         "tenants": [asdict(t) for t in settings.tenants],
         "sources": settings.sources,
     }
-    path.write_text(json.dumps(data, indent=2) + "\n")
-    return path
+    return json.dumps(data, indent=2) + "\n"
+
+
+def describe_settings(settings: Settings) -> list[tuple[str, Any, str]]:
+    """List every individual setting for display.
+
+    Args:
+        settings: The settings to describe.
+
+    Returns:
+        ``(dotted path, value, source)`` for each leaf setting, in file order.
+        File sources are shortened to the file name, e.g. ``simulation.json``.
+    """
+    rows = []
+
+    def walk(data: dict, prefix: str) -> None:
+        """Append a row per leaf value under ``data``."""
+        for key, value in data.items():
+            path = f"{prefix}{key}"
+            if isinstance(value, dict) and value:
+                walk(value, f"{path}.")
+            else:
+                source = origin_of(settings.origins, path)
+                rows.append((path, value, Path(source).name if "/" in source else source))
+
+    walk(settings.simulation, "")
+    return rows
 
 
 def parse_value(text: str) -> Any:

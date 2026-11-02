@@ -6,14 +6,22 @@ A settings error prints one clear line and exits with status 2.
 """
 
 import argparse
+import json
+import os
+import subprocess
 import sys
+from pathlib import Path
 
 from edgefogsim import __version__
-from edgefogsim.config import ConfigError, load_settings, parse_value
+from edgefogsim.config import ConfigError, Settings, load_settings, parse_value
+from edgefogsim.models import Task
 from edgefogsim.workload import load_tasks
 
-COMMANDS = ("menu", "run")
+COMMANDS = ("menu", "web", "run")
 """Sub-commands; ``menu`` is assumed when none is given."""
+
+WEB_ARGS_ENV = "EDGEFOGSIM_ARGS"
+"""Environment variable carrying the ``web`` command's options (a JSON list) to the Streamlit app."""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -45,8 +53,10 @@ def build_parser() -> argparse.ArgumentParser:
     shared.add_argument("--set", metavar="KEY=VALUE", action="append", default=[], dest="settings",
                         help="change any setting, e.g. generator.count=20 (repeatable)")
 
-    sub = parser.add_subparsers(dest="command", metavar="{menu,run}")
-    sub.add_parser("menu", parents=[shared], help="interactive menu (default)")
+    sub = parser.add_subparsers(dest="command", metavar="{menu,web,run}")
+    sub.add_parser("menu", parents=[shared], help="interactive command-line menu (default)")
+    web = sub.add_parser("web", parents=[shared], help="open the Streamlit app in your browser")
+    web.add_argument("--port", type=int, default=8501, help="port for the Streamlit server (default: 8501)")
     run = sub.add_parser("run", parents=[shared], help="run a workload through a policy without the menu")
     run.add_argument(
         "--policy",
@@ -88,6 +98,43 @@ def collect_overrides(args: argparse.Namespace) -> dict:
     return overrides
 
 
+def prepare(args: argparse.Namespace) -> tuple[Settings, list[Task]]:
+    """Load settings and the starting workload for any command.
+
+    Args:
+        args: Parsed arguments from :func:`build_parser`.
+
+    Returns:
+        The validated settings and the tasks from ``--tasks FILE`` (empty otherwise).
+
+    Raises:
+        ConfigError: If a settings file, override or task file is invalid.
+    """
+    settings = load_settings(config_file=args.config, nodes_file=args.nodes, overrides=collect_overrides(args))
+    tasks = load_tasks(args.tasks, settings) if args.tasks and not args.tasks.isdigit() else []
+    return settings, tasks
+
+
+def launch_web(options: list[str], port: int) -> int:
+    """Start the Streamlit app, passing the shared options through an environment variable.
+
+    Args:
+        options: The command-line options given after ``web`` (minus ``--port``),
+            re-parsed by the app so it starts with the same settings.
+        port: Port for the Streamlit server.
+
+    Returns:
+        Streamlit's exit status.
+    """
+    app = Path(__file__).resolve().parent / "web.py"
+    env = {**os.environ, WEB_ARGS_ENV: json.dumps(options)}
+    command = [sys.executable, "-m", "streamlit", "run", str(app), "--server.port", str(port)]
+    try:
+        return subprocess.call(command, env=env)
+    except KeyboardInterrupt:
+        return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run the program.
 
@@ -103,11 +150,14 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     try:
-        settings = load_settings(config_file=args.config, nodes_file=args.nodes, overrides=collect_overrides(args))
-        tasks = load_tasks(args.tasks, settings) if args.tasks and not args.tasks.isdigit() else []
+        settings, tasks = prepare(args)
     except ConfigError as exc:
         print(f"Settings error: {exc}", file=sys.stderr)
         return 2
+
+    if args.command == "web":
+        options = _without_port(argv[1:])
+        return launch_web(options, args.port)
 
     if args.command == "run":
         # Filled in by Phase 2 (placement engine).
@@ -121,6 +171,19 @@ def main(argv: list[str] | None = None) -> int:
     except (KeyboardInterrupt, EOFError):
         print("\nBye.")
     return 0
+
+
+def _without_port(options: list[str]) -> list[str]:
+    """Drop ``--port N`` / ``--port=N`` from an option list; the app itself doesn't take it."""
+    kept, skip = [], False
+    for item in options:
+        if skip:
+            skip = False
+        elif item == "--port":
+            skip = True
+        elif not item.startswith("--port="):
+            kept.append(item)
+    return kept
 
 
 if __name__ == "__main__":
