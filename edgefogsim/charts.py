@@ -90,7 +90,7 @@ def node_usage_chart(result: RunResult) -> Figure:
               "Used by tasks (load)": [100 * n.load_util for n in result.nodes]}
     fig, ax = _figure(height=3.2)
     _grouped_bars(ax, names, series, [TIER_COLORS["edge"], TIER_COLORS["fog"]], suffix="%")
-    ax.set_ylim(0, 115)
+    ax.set_ylim(0, 112)
     _finish(ax, f"Node CPU after {result.label}", "% of CPU", horizontal=False)
     return fig
 
@@ -148,7 +148,7 @@ def before_after_chart(before: RunResult, after: RunResult, change: str) -> Figu
     nodes = [n.id for n in after.nodes]
     load = {name: [100 * n.load_util for n in run.nodes] for name, run in (("Before", before), ("After", after))}
     _grouped_bars(right, nodes, load, [BEFORE_COLOR, AFTER_COLOR], suffix="%")
-    right.set_ylim(0, 115)
+    right.set_ylim(0, 112)
     _finish(right, "CPU load per node", "% of CPU", horizontal=False)
     fig.suptitle(f"Before / after: {change} ({after.label})", color=INK, fontsize=12, x=0.01, ha="left")
     fig.tight_layout()
@@ -239,7 +239,10 @@ def _grouped_bars(ax: plt.Axes, names: list[str], series: dict[str, list[float]]
             ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f"{value:.0f}{suffix}",
                     ha="center", va="bottom", fontsize=8, color=INK_SECONDARY)
     ax.set_xticks(range(len(names)), names)
-    ax.legend(frameon=False, fontsize=9, loc="upper right")
+    top = max((v for values in series.values() for v in values), default=1) or 1
+    ax.set_ylim(0, top * 1.15)  # headroom for the value labels
+    # Legend above the plot, so it never covers a tall bar.
+    ax.legend(frameon=False, fontsize=9, loc="lower right", bbox_to_anchor=(1, 1.0), ncols=len(series))
 
 
 def _finish(ax: plt.Axes, title: str, value_label: str, horizontal: bool = True) -> None:

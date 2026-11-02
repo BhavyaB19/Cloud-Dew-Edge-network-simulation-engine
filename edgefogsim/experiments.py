@@ -63,6 +63,9 @@ class Experiment:
         actual: Markdown lines describing what happened (tables, quotes, images).
         checks: ``(statement, held)`` pairs comparing expected with actual.
         evidence: Files produced, relative to the experiments folder.
+        tables: The actual-outcome tables as data, ``(title, headers, rows)``, for the report and slides.
+        figures: Charts as ``(path relative to the experiments folder, caption)``.
+        quotes: Notable output lines (decision reasons, access attempts).
     """
 
     key: str
@@ -72,6 +75,20 @@ class Experiment:
     actual: list[str] = field(default_factory=list)
     checks: list[tuple[str, bool]] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
+    tables: list[tuple[str, list[str], list[list[Any]]]] = field(default_factory=list)
+    figures: list[tuple[str, str]] = field(default_factory=list)
+    quotes: list[str] = field(default_factory=list)
+
+    def add_table(self, title: str, headers: list[str], rows: list[list[Any]]) -> None:
+        """Record a table and append it to the markdown write-up."""
+        self.tables.append((title, headers, rows))
+        self.actual += ["", f"*{title}*", "", *_markdown_table(headers, rows)] if title else \
+            ["", *_markdown_table(headers, rows)]
+
+    def add_figure(self, path: str, caption: str) -> None:
+        """Record a chart and embed it in the markdown write-up."""
+        self.figures.append((path, caption))
+        self.actual += ["", f"![{caption}]({path})"]
 
     @property
     def passed(self) -> bool:
@@ -180,10 +197,10 @@ def policy_comparison(settings: Settings, spec: dict[str, Any], folder: Path) ->
     export_comparison(results, settings, folder)
     exp.evidence += ["comparison.csv", "comparison.json"]
     exp.evidence += [p.name for p in charts.save_comparison_charts(results, folder).values()]
-    exp.actual += _summary_markdown(results)
-    exp.actual += ["", f"![Task outcomes by policy](E1/outcomes.png)", "",
-                   f"![Where each policy placed the tasks](E1/tiers.png)", "",
-                   f"![Latency as a share of the deadline](E1/latency.png)"]
+    exp.add_table("", *_summary_rows(results))
+    exp.add_figure("E1/outcomes.png", "Task outcomes by policy")
+    exp.add_figure("E1/tiers.png", "Where each policy placed the tasks")
+    exp.add_figure("E1/latency.png", "Latency as a share of each task's deadline")
     by_key = {r.policy: r.summary() for r in results}
     best_baseline = max((by_key[k]["on_time"] for k in baselines), default=0)
     for key in smart:
@@ -219,18 +236,20 @@ def overload(settings: Settings, spec: dict[str, Any], folder: Path) -> Experime
         results.append(result)
         decisions_table(result).to_csv(folder / f"decisions_{key}.csv", index=False)
         exp.evidence.append(f"decisions_{key}.csv")
-    exp.actual += _summary_markdown(results)
+    exp.add_table("", *_summary_rows(results))
     capacity = next((r for r in results if r.policy == "capacity"), results[-1])
     offload = next((d for d in capacity.decisions if d.offloaded and d.placed), None)
     reject = next((d for d in capacity.decisions if d.outcome == REJECTED), None)
     if offload:
+        exp.quotes.append(f"Offload, {offload.task.id} → {offload.node_id}: {offload.reason}")
         exp.actual += ["", f"Example offload ({offload.task.id} → {offload.node_id}):", f"> {offload.reason}"]
     if reject:
+        exp.quotes.append(f"Rejection, {reject.task.id}: {reject.reason}")
         exp.actual += ["", f"Example rejection ({reject.task.id}):", f"> {reject.reason}"]
     exp.evidence.append(charts.save_figure(charts.outcomes_chart(results), folder / "outcomes.png").name)
     exp.evidence.append(charts.save_figure(charts.node_usage_chart(capacity), folder / "node_usage.png").name)
-    exp.actual += ["", "![Outcomes under overload](E2/outcomes.png)", "",
-                   "![Node CPU after the burst](E2/node_usage.png)"]
+    exp.add_figure("E2/outcomes.png", "Task outcomes under overload")
+    exp.add_figure("E2/node_usage.png", "Node CPU after the burst (Capacity-Aware)")
     m = capacity.summary()
     exp.checks += [
         (f"{capacity.label} offloads at least one task ({m['offloaded']} offloaded)", m["offloaded"] >= 1),
@@ -294,9 +313,10 @@ def unauthorised_access(settings: Settings, spec: dict[str, Any], folder: Path) 
     (folder / "access_attempts.txt").write_text("\n".join(lines) + "\n")
     exp.evidence += ["access_attempts.txt", "audit.log"]
     entries = audit.entries()
-    exp.actual += ["```", *lines, "```", "", "Audit log:", "",
-                   *_markdown_table(["timestamp", "actor", "target_tenant", "resource", "outcome"],
-                                    [list(e.values()) for e in entries])]
+    exp.quotes += lines
+    exp.actual += ["```", *lines, "```"]
+    exp.add_table("Audit log", ["timestamp", "actor", "target_tenant", "resource", "outcome"],
+                  [list(e.values()) for e in entries])
     exp.checks += [
         (f"All {len(attempts)} attempts by {actor.tenant_id} were refused ({denied} refused)", denied == len(attempts)),
         (f"The audit log has one line per refusal ({len(entries)} lines)", len(entries) == len(attempts)),
@@ -327,9 +347,9 @@ def node_change(settings: Settings, spec: dict[str, Any], folder: Path) -> Exper
         tag = f"{sub.name}/"
         exp.evidence += [tag + "before_after.csv", tag + "before_after.png",
                          tag + "decisions_before.csv", tag + "decisions_after.csv"]
-        exp.actual += ["" if exp.actual else None, f"**Change {sub.name}: {result.change}**", "",
-                       *_markdown_table(["Metric", "Before", "After"], _before_after_rows(result)),
-                       "", f"![Before and after {result.change}](E4/{sub.name}/before_after.png)"]
+        exp.add_table(f"Change {sub.name}: {result.change}", ["Metric", "Before", "After"],
+                      _before_after_rows(result))
+        exp.add_figure(f"E4/{sub.name}/before_after.png", f"Before and after: {result.change}")
         exp.checks += _node_change_checks(result, change)
     return exp
 
@@ -352,7 +372,7 @@ def write_report(run: ExperimentRun) -> Path:
     for e in run.experiments:
         lines += ["", f"## {e.key}: {e.title}", "", "**Setup**", "", *[f"- {s}" for s in e.setup],
                   "", "**Expected outcome**", "", e.expected, "", "**Actual outcome**", "",
-                  *[line for line in e.actual if line is not None],
+                  *e.actual,
                   "", "**Expected vs actual**", "", *[f"- {'✅' if held else '❌'} {s}" for s, held in e.checks],
                   "", "**Evidence**", "", *[f"- [{p}]({p})" for p in e.evidence]]
     run.report.write_text("\n".join(lines) + "\n")
@@ -423,15 +443,15 @@ def _before_after_rows(result) -> list[list[str]]:
     return rows
 
 
-def _summary_markdown(results: list[RunResult]) -> list[str]:
-    """A markdown table of headline numbers, one row per policy."""
+def _summary_rows(results: list[RunResult]) -> tuple[list[str], list[list[Any]]]:
+    """Headers and rows of headline numbers, one row per policy."""
     rows = []
     for r in results:
         m = r.summary()
         rows.append([r.label, m["on_time"], m["late"], m["rejected"], m["offloaded"], f"{m['success_rate']:.0%}",
                      "-" if m["avg_latency_ms"] is None else f"{m['avg_latency_ms']:.1f}",
                      "-" if m["p95_latency_ms"] is None else f"{m['p95_latency_ms']:.1f}"])
-    return _markdown_table(["Policy", "On time", "Late", "Rejected", "Offloaded", "Success", "Avg ms", "P95 ms"], rows)
+    return ["Policy", "On time", "Late", "Rejected", "Offloaded", "Success", "Avg ms", "P95 ms"], rows
 
 
 def _markdown_table(headers: list[str], rows: list[list[Any]]) -> list[str]:

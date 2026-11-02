@@ -1,0 +1,16 @@
+change_made,metric,before,after,change
+edge-1 cpu_cores 4 → 8,placed,11.0,12.0,1.0
+edge-1 cpu_cores 4 → 8,on_time,11.0,12.0,1.0
+edge-1 cpu_cores 4 → 8,late,0.0,0.0,0.0
+edge-1 cpu_cores 4 → 8,rejected,9.0,8.0,-1.0
+edge-1 cpu_cores 4 → 8,offloaded,3.0,3.0,0.0
+edge-1 cpu_cores 4 → 8,running_vms,8.0,9.0,1.0
+edge-1 cpu_cores 4 → 8,success_rate,0.55,0.6,0.04999999999999993
+edge-1 cpu_cores 4 → 8,avg_latency_ms,70.92416276518402,65.31937142364092,-5.604791341543105
+edge-1 cpu_cores 4 → 8,p95_latency_ms,120.27586206896552,120.27586206896552,0.0
+edge-1 cpu_cores 4 → 8,edge-1 util,0.75,0.75,0.0
+edge-1 cpu_cores 4 → 8,edge-1 load,0.75,0.75,0.0
+edge-1 cpu_cores 4 → 8,fog-1 util,1.0,1.0,0.0
+edge-1 cpu_cores 4 → 8,fog-1 load,0.5,0.5,0.0
+edge-1 cpu_cores 4 → 8,cloud-1 util,0.1875,0.1875,0.0
+edge-1 cpu_cores 4 → 8,cloud-1 load,0.1484375,0.1484375,0.0

@@ -8,7 +8,7 @@ A locally runnable Python simulator that places computing tasks on Edge, Fog or 
   <em>The same 12 tasks through all four placement policies. The smart policies reject what they can't finish in time instead of running it late.</em>
 </p>
 
-> **Status:** Phase 5 (placement, shared VMs, tenant security, results, charts and the four required experiments). The report, slides and submission ZIP arrive in Phase 6. See [docs/SPEC.md](docs/SPEC.md) for the full plan.
+> **Status:** complete for submission: simulator, both interfaces, the four experiments, report, slides and submission ZIP. See [docs/SPEC.md](docs/SPEC.md) for the full spec and acceptance criteria.
 
 ## Setup
 
@@ -86,6 +86,12 @@ Useful options (they work with `menu`, `web` and `run`):
 
 ## Results and charts
 
+<p align="center">
+  <img src="docs/screenshots/web-results.png" alt="Streamlit Results page: policy comparison table, task outcomes and placement-by-tier charts, and latency as a share of each task's deadline" width="760">
+  <br>
+  <em>The app's Results page: the comparison table, where each policy placed the tasks, and latency against each task's deadline.</em>
+</p>
+
 Menu option 14 (or the app's **Results** page) saves the last run and the last policy comparison to a new folder under `results/`:
 
 | File | What it holds |
@@ -117,6 +123,25 @@ python run_experiments.py
 
 Each experiment states its expected outcome, runs, then checks the expectation against the actual numbers. The output folder `results/<time>-experiments/` holds `experiments.md` (setup, expected outcome, actual outcome with tables and charts, checks, evidence links) and one evidence folder per experiment. Change the workloads or node changes in `config/experiments.json`, or pass your own file with `--experiments my_experiments.json`. The admin can also run them from menu option 16 or the app's Results page.
 
+## Report, slides and submission
+
+| Deliverable | Where |
+|-------------|-------|
+| Architecture diagram | [docs/architecture.png](docs/architecture.png) |
+| Report (6 pages) | [docs/report/EdgeFogSim_Report.docx](docs/report/EdgeFogSim_Report.docx) ([PDF](docs/report/EdgeFogSim_Report.pdf)) |
+| Presentation (7 slides, with speaker notes) | [docs/report/EdgeFogSim_Slides.pptx](docs/report/EdgeFogSim_Slides.pptx) ([PDF](docs/report/EdgeFogSim_Slides.pdf)) |
+| Experiments write-up and evidence | [docs/evidence/experiments/experiments.md](docs/evidence/experiments/experiments.md) |
+| Test results | [docs/evidence/test_results.txt](docs/evidence/test_results.txt) |
+
+The diagram, report and slides are generated from the code and a fresh experiment run, so their numbers always match. To regenerate everything, run the tests and build the single submission ZIP:
+
+```bash
+pip install -r requirements-docs.txt   # python-docx and python-pptx, only needed for this step
+python make_zip.py --rebuild
+```
+
+`make_zip.py` refuses to build if any deliverable the brief lists is missing, and prints the checklist. If LibreOffice is installed (`brew install --cask libreoffice`), it also saves PDF copies of the report and slides. Without `--rebuild` it packs what is already there. Polish the report and slides in Word/PowerPoint afterwards if you like, but note that `--rebuild` overwrites them.
+
 ## Test
 
 ```bash
@@ -131,8 +156,14 @@ pytest
 | `config/` | Default settings you can edit: nodes, tenants, simulation, experiments |
 | `examples/tasks_sample.csv` | Template for supplying your own task list |
 | `tests/` | pytest suite |
+| `run_experiments.py` | Runs the four experiments |
+| `make_zip.py` | Builds and checks the submission ZIP |
+| `tools/` | Scripts that generate the diagram, report and slides |
 | `docs/SPEC.md` | Feature spec, acceptance criteria and delivery phases |
-| `docs/screenshots/` | Screenshots used in this README |
+| `docs/architecture.png` | Architecture diagram |
+| `docs/report/` | Project report (.docx) and presentation (.pptx) |
+| `docs/evidence/` | Experiment write-up and evidence, test results |
+| `docs/screenshots/` | Screenshots of both interfaces |
 
 ## Using your own parameters
 

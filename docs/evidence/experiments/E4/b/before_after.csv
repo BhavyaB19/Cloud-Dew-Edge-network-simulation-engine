@@ -1,0 +1,16 @@
+change_made,metric,before,after,change
+cloud-1 base_latency_ms 80 → 150,placed,11.0,9.0,-2.0
+cloud-1 base_latency_ms 80 → 150,on_time,11.0,9.0,-2.0
+cloud-1 base_latency_ms 80 → 150,late,0.0,0.0,0.0
+cloud-1 base_latency_ms 80 → 150,rejected,9.0,11.0,2.0
+cloud-1 base_latency_ms 80 → 150,offloaded,3.0,1.0,-2.0
+cloud-1 base_latency_ms 80 → 150,running_vms,8.0,8.0,0.0
+cloud-1 base_latency_ms 80 → 150,success_rate,0.55,0.45,-0.10000000000000003
+cloud-1 base_latency_ms 80 → 150,avg_latency_ms,70.92416276518402,96.62968651651289,25.70552375132887
+cloud-1 base_latency_ms 80 → 150,p95_latency_ms,120.27586206896552,189.59322033898306,69.31735827001754
+cloud-1 base_latency_ms 80 → 150,edge-1 util,0.75,0.75,0.0
+cloud-1 base_latency_ms 80 → 150,edge-1 load,0.75,0.75,0.0
+cloud-1 base_latency_ms 80 → 150,fog-1 util,1.0,1.0,0.0
+cloud-1 base_latency_ms 80 → 150,fog-1 load,0.5,0.5,0.0
+cloud-1 base_latency_ms 80 → 150,cloud-1 util,0.1875,0.1875,0.0
+cloud-1 base_latency_ms 80 → 150,cloud-1 load,0.1484375,0.109375,-0.0390625
