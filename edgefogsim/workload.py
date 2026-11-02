@@ -36,7 +36,9 @@ def generate_tasks(
     """Create random tasks from the ``generator`` settings.
 
     CPU, memory and work units are drawn uniformly from their configured
-    ranges (whole numbers when both bounds are whole). Tenant and sensitivity
+    ranges (whole numbers when both bounds are whole). Work units have a range
+    per sensitivity, because urgent jobs (e.g. a brake-sensor check) are small
+    and heavy jobs (e.g. a nightly report) can wait. Tenant and sensitivity
     are drawn using their configured shares; an empty ``tenant_mix`` splits
     tasks evenly across all non-admin tenants.
 
@@ -62,13 +64,15 @@ def generate_tasks(
     ids = _id_sequence(existing)
     tasks = []
     for _ in range(count):
+        tenant_id = rng.choices(tenant_ids, tenant_weights)[0]
+        sensitivity = rng.choices(levels, level_weights)[0]
         tasks.append(Task(
             id=next(ids),
-            tenant_id=rng.choices(tenant_ids, tenant_weights)[0],
+            tenant_id=tenant_id,
             cpu_cores=_draw(rng, gen["cpu_range"]),
             memory_gb=_draw(rng, gen["memory_range"]),
-            sensitivity=rng.choices(levels, level_weights)[0],
-            work_units=_draw(rng, gen["work_range"]),
+            sensitivity=sensitivity,
+            work_units=_draw(rng, gen["work_range"][sensitivity]),
         ))
     return tasks
 

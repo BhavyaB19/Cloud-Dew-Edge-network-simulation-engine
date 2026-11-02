@@ -32,9 +32,9 @@ DEFAULT_SIMULATION: dict[str, Any] = {
     "generator": {
         "count": 12,
         "seed": 42,
-        "cpu_range": [1, 8],
-        "memory_range": [0.5, 16],
-        "work_range": [2, 40],
+        "cpu_range": [1, 4],
+        "memory_range": [0.5, 8],
+        "work_range": {"high": [1, 6], "medium": [5, 40], "low": [10, 100]},
         "sensitivity_mix": {"high": 0.4, "medium": 0.3, "low": 0.3},
         "tenant_mix": {},
     },
@@ -52,6 +52,16 @@ DEFAULT_SIMULATION: dict[str, Any] = {
         "soft_overload_retry": True,
         "capacity_weights": {"tier": 0.5, "slack": 0.3, "free": 0.2},
         "topsis_weights": {"latency": 0.5, "cpu": 0.3, "memory": 0.2},
+    },
+    "vm": {
+        "sizes": {
+            "edge": {"cpu_cores": 2, "memory_gb": 4},
+            "fog": {"cpu_cores": 4, "memory_gb": 8},
+            "cloud": {"cpu_cores": 8, "memory_gb": 16},
+        },
+    },
+    "security": {
+        "audit_log": "results/audit.log",
     },
     "qlearning": {
         "alpha": 0.1,
@@ -101,7 +111,7 @@ class Settings:
 
     Attributes:
         simulation: Nested dict shaped like ``config/simulation.json``
-            (``generator``, ``qos``, ``policy``, ``qlearning``).
+            (``generator``, ``qos``, ``policy``, ``vm``, ``security``, ``qlearning``).
         nodes: The nodes to simulate, with live usage starting at zero.
         tenants: Everyone who can log in.
         sources: Every layer that contributed, lowest precedence first.
@@ -464,8 +474,10 @@ def validate_simulation(settings: Settings) -> None:
 
     number("generator.count", minimum=1, integer=True)
     number("generator.seed", integer=True)
-    for key in ("cpu_range", "memory_range", "work_range"):
+    for key in ("cpu_range", "memory_range"):
         value_range(f"generator.{key}")
+    for level in SENSITIVITIES:
+        value_range(f"generator.work_range.{level}")
     mix("generator.sensitivity_mix", list(SENSITIVITIES))
     if not sim["generator"]["sensitivity_mix"]:
         fail("generator.sensitivity_mix", "must name at least one sensitivity")
@@ -486,6 +498,14 @@ def validate_simulation(settings: Settings) -> None:
         fail("policy.soft_overload_retry", "must be true or false")
     weights("policy.capacity_weights", ("tier", "slack", "free"))
     weights("policy.topsis_weights", ("latency", "cpu", "memory"))
+
+    for tier in TIERS:
+        for key in ("cpu_cores", "memory_gb"):
+            number(f"vm.sizes.{tier}.{key}", minimum=0, inclusive_min=False)
+
+    audit_log = settings.get("security.audit_log")
+    if not isinstance(audit_log, str) or not audit_log.strip():
+        fail("security.audit_log", "must be a file path")
 
     number("qlearning.alpha", minimum=0, maximum=1, inclusive_min=False)
     number("qlearning.gamma", minimum=0, maximum=1)
@@ -629,6 +649,6 @@ def _is_number(value: Any) -> bool:
 def _node_definition(node: Node) -> dict[str, Any]:
     """A node's static definition as a dict, without its live usage fields."""
     data = asdict(node)
-    data.pop("cpu_used")
-    data.pop("memory_used")
+    for live in ("cpu_used", "memory_used", "cpu_load", "memory_load"):
+        data.pop(live)
     return data

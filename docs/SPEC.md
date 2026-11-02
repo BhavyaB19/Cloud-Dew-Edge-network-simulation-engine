@@ -15,7 +15,7 @@ This document is the source of truth. Every feature below has an ID (`F#`) and a
 | F3 | Placement engine | Pluggable policies: **Latency-First** and **Cloud-Only** (baselines), **Capacity-Aware** (the required rule-based algorithm, filter-then-score), **TOPSIS** (multi-criteria ranking), and optionally **Q-Learning** (reinforcement learning). Every decision records a human-readable reason | Placement algorithm (20) |
 | F4 | Overload handling | If the preferred node lacks capacity, try the next suitable tier (offload); if nothing fits or the deadline cannot be met, reject with a reason | Placement algorithm (20) |
 | F5 | Latency / QoS model | Simulated latency = network latency + processing time × congestion factor; deadline per sensitivity; success/failure per task | QoS (15) |
-| F6 | VM manager | Each placed task gets a VM record (VM ID, host node, allocated CPU/RAM, tenant, status). Create, stop, list. Stopping frees node capacity | VM & access control (15) |
+| F6 | VM manager | Shared, tenant-owned VMs (VM ID, host node, reserved CPU/RAM, tasks inside, status). Tasks join a VM with room or a new one is created. Create, stop, list. Stopping frees the VM's slice of the node | VM & access control (15) |
 | F7 | Tenant access control | Log in as a tenant (tenant ID + role, no real passwords). Tenants see only their own tasks/VMs; cross-tenant reads raise `AccessDenied` and are written to an audit log | VM & access control (15) |
 | F8 | Metrics & results | Per-task results table, per-node utilisation, total/successful/failed/rejected counts, average and p95 latency, deadline-hit rate. Saved to CSV + JSON | QoS (15) |
 | F9 | Charts | matplotlib: placements per tier by policy, node utilisation, latency distribution, before/after comparison | QoS (15) |
@@ -192,14 +192,22 @@ The surveys group fog/edge scheduling methods into heuristic, metaheuristic, mac
 
 ### VM lifecycle
 
-`PENDING → RUNNING` on placement (resources allocated) → `STOPPED` on stop (resources freed). VM IDs look like `vm-0001`. A rejected task creates no VM.
+VMs are **shared slices of a node, owned by one tenant**:
+
+- **Placing a task**: once the policy picks a node, the task joins one of its tenant's running VMs there that has room (best fit). Otherwise a new VM is created, sized to the tier's default (`vm.sizes`: edge 2 CPU / 4 GB, fog 4 / 8, cloud 8 / 16) or to the task if the task is bigger. Tenants never share a VM.
+- **Two levels of usage per node**: *reserved* (`cpu_used`, held by VMs) decides whether a new VM fits; *load* (`cpu_load`, used by tasks) drives latency and the headroom filter. An idle VM reserves room but doesn't slow the node down.
+- **Create**: a tenant (or the admin, for any tenant) can create an empty VM ahead of time to reserve room; their next task on that node joins it.
+- **Stop**: frees the VM's whole slice and stops the tasks inside it. Stopping twice frees nothing twice. A stopped VM stays listed with its task history.
+- VM ids look like `vm-0001`. A rejected task gets no VM. The VM manager is the only code that changes node usage, so reserved CPU always equals the sum of running VM sizes and load equals the sum of their tasks.
+- After a run, a single task can be placed on what's left (e.g. a task rejected earlier, after stopping a VM).
 
 ### Security model
 
-- `Session(tenant_id, role)` where role is `tenant` or `admin`. Login is by choosing a tenant ID from `config/tenants.json`. No passwords are stored.
-- Every read of tasks, VMs or results goes through `security.authorize(session, record)`.
-- Tenant → own records only. Admin → everything (needed to edit nodes and run experiments).
-- A violation raises `AccessDenied` and appends `timestamp, actor, target_tenant, resource, DENIED` to `results/audit.log`.
+- Login is choosing a tenant from `config/tenants.json` (role `tenant` or `admin`). No passwords are stored.
+- One rule, in `security.authorize(user, owner, resource, audit)`: a tenant may access records they own; an admin may access everything.
+- Lists (tasks, decisions, VMs, audit entries) are filtered to what the user may see. Totals and node usage are cluster-wide and shown to everyone.
+- Asking for a specific record by id (lookup, stop VM, place task, adding a task for someone else) that isn't yours raises `AccessDenied` and appends a CSV row `timestamp,actor,target_tenant,resource,outcome` to the audit log (`security.audit_log`, default `results/audit.log`).
+- An id that doesn't exist is reported as not found and is not logged.
 
 ---
 
@@ -223,9 +231,11 @@ The resolved settings are printed at start-up and written into every results fol
 |------|------|------|
 | Nodes | `nodes.json` | list of `{id, tier, cpu_cores, memory_gb, base_latency_ms, speed_factor}`; any number of nodes per tier |
 | Tasks | `--tasks file.csv / .json` or menu | `id, tenant_id, cpu_cores, memory_gb, sensitivity, work_units` (id optional, auto-numbered if blank) |
-| Generator | `simulation.json` → `generator` | `count`, `seed`, `cpu_range`, `memory_range`, `work_range`, `sensitivity_mix` (e.g. `{high:0.4, medium:0.3, low:0.3}`), `tenant_mix` |
+| Generator | `simulation.json` → `generator` | `count`, `seed`, `cpu_range` ([1, 4]), `memory_range` ([0.5, 8]), `work_range` per sensitivity (high [1, 6], medium [5, 40], low [10, 100]: urgent jobs are small), `sensitivity_mix` (e.g. `{high:0.4, medium:0.3, low:0.3}`), `tenant_mix` |
 | QoS | `simulation.json` → `qos` | `deadlines_ms` per sensitivity, `congestion_cap` (0.95) |
 | Policy | `simulation.json` → `policy` | `headroom` (0.85), `tier_preference` per sensitivity, `soft_overload_retry` (true), `capacity_weights` (`tier` 0.5, `slack` 0.3, `free` 0.2), `topsis_weights` (`latency` 0.5, `cpu` 0.3, `memory` 0.2) |
+| VMs | `simulation.json` → `vm` | `sizes` per tier: edge 2 CPU / 4 GB, fog 4 / 8, cloud 8 / 16 |
+| Security | `simulation.json` → `security` | `audit_log` (`results/audit.log`) |
 | Q-learning | `simulation.json` → `qlearning` | `alpha` (0.1), `gamma` (0.9), `epsilon` (0.2), `episodes` (500), `train_seed` (1000) |
 | Tenants | `tenants.json` | list of `{tenant_id, role}` |
 | Experiments | `experiments.json` | per experiment: workload source, seed, node overrides, policies to compare |
@@ -244,17 +254,26 @@ python -m edgefogsim
  ├─ Login: pick tenant (hospital-a / hospital-b / admin)
  │
  └─ Main menu
-     1. View nodes (capacity, utilisation, latency)
-     2. Workload → generate N tasks (seed) | load CSV | add task manually
-     3. Choose policy (Latency-First / Cloud-Only / Capacity-Aware / TOPSIS / Q-Learning)
-     4. Run placement → live decision log with reasons
-     5. View results table (own tasks only, or all if admin)
-     6. VMs → list | create | stop (frees capacity)
-     7. View another tenant's task by ID   → ACCESS DENIED + audit entry
-     8. Export results (CSV + JSON) and charts (PNG)
-     9. [admin] Edit node capacity/latency → re-run → diff
-    10. [admin] Run all experiments
-    11. Switch user / Exit
+     Nodes and workload
+       1. View nodes (usage after the last run)
+       2. Generate random tasks (count, seed)
+       3. Load tasks from a file (Enter = sample file)
+       4. Add a task by hand (a tenant can only add their own)
+       5. View tasks (own only; all for admin)
+     Placement
+       6. Run placement → decision log with reasons, VM per task
+       7. Compare all policies
+     Virtual machines
+       8. View VMs (own only; all for admin): size, use, tasks inside
+       9. Create a VM (reserve room on a node)
+      10. Stop a VM → frees its slice of the node
+      11. Place one task now → joins a VM with room or creates one
+     Security
+      12. Look up a task or VM by id → ACCESS DENIED + audit entry if not yours
+      13. View audit log (own attempts; all for admin)
+     Settings
+      14. View settings   15. Change a setting   16. Save settings   17. Switch user
+       0. Exit
 ```
 
 The same flow in the browser:
