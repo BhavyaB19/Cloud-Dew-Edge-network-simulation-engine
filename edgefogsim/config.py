@@ -32,9 +32,9 @@ DEFAULT_SIMULATION: dict[str, Any] = {
     "generator": {
         "count": 12,
         "seed": 42,
-        "cpu_range": [1, 8],
-        "memory_range": [0.5, 16],
-        "work_range": [2, 40],
+        "cpu_range": [1, 4],
+        "memory_range": [0.5, 8],
+        "work_range": {"high": [1, 6], "medium": [5, 40], "low": [10, 100]},
         "sensitivity_mix": {"high": 0.4, "medium": 0.3, "low": 0.3},
         "tenant_mix": {},
     },
@@ -52,6 +52,19 @@ DEFAULT_SIMULATION: dict[str, Any] = {
         "soft_overload_retry": True,
         "capacity_weights": {"tier": 0.5, "slack": 0.3, "free": 0.2},
         "topsis_weights": {"latency": 0.5, "cpu": 0.3, "memory": 0.2},
+    },
+    "vm": {
+        "sizes": {
+            "edge": {"cpu_cores": 2, "memory_gb": 4},
+            "fog": {"cpu_cores": 4, "memory_gb": 8},
+            "cloud": {"cpu_cores": 8, "memory_gb": 16},
+        },
+    },
+    "security": {
+        "audit_log": "results/audit.log",
+    },
+    "output": {
+        "dir": "results",
     },
     "qlearning": {
         "alpha": 0.1,
@@ -101,7 +114,7 @@ class Settings:
 
     Attributes:
         simulation: Nested dict shaped like ``config/simulation.json``
-            (``generator``, ``qos``, ``policy``, ``qlearning``).
+            (``generator``, ``qos``, ``policy``, ``vm``, ``security``, ``output``, ``qlearning``).
         nodes: The nodes to simulate, with live usage starting at zero.
         tenants: Everyone who can log in.
         sources: Every layer that contributed, lowest precedence first.
@@ -196,6 +209,7 @@ def load_settings(
             nodes_raw, nodes_source = data.pop("nodes"), str(config_file)
         if "tenants" in data:
             tenants_raw, tenants_source = data.pop("tenants"), str(config_file)
+        data.pop("sources", None)  # informational list written by save_settings
         _merge(simulation, data, "", str(config_file), origins)
         sources.append(str(config_file))
 
@@ -213,6 +227,60 @@ def load_settings(
     settings = Settings(simulation, nodes, tenants, sources, origins)
     validate_simulation(settings)
     return settings
+
+
+NODE_EDITABLE = ("cpu_cores", "memory_gb", "base_latency_ms", "speed_factor")
+"""Node fields that can be changed after loading (id and tier stay fixed)."""
+
+
+def with_node_changes(settings: Settings, changes: dict[str, dict[str, Any]],
+                      source: str = "menu") -> Settings:
+    """A copy of the settings with some node fields changed; the original is untouched.
+
+    Used for before/after comparisons: run once with ``settings``, once with the copy.
+
+    Args:
+        settings: The current settings.
+        changes: Node id -> {field: new value}, e.g. ``{"edge-1": {"cpu_cores": 8}}``.
+            Fields must be in ``NODE_EDITABLE``.
+        source: Label used in error messages.
+
+    Returns:
+        New settings sharing everything except the changed nodes.
+
+    Raises:
+        ConfigError: For an unknown node or field, or an invalid value.
+    """
+    definitions = [_node_definition(n) for n in settings.nodes]
+    known = {d["id"] for d in definitions}
+    for node_id, fields in changes.items():
+        if node_id not in known:
+            raise ConfigError(source, node_id, f"unknown node; expected one of {', '.join(sorted(known))}")
+        for key in fields:
+            if key not in NODE_EDITABLE:
+                raise ConfigError(source, f"{node_id}.{key}", f"can't be changed; editable: {', '.join(NODE_EDITABLE)}")
+    for definition in definitions:
+        definition.update(changes.get(definition["id"], {}))
+    nodes = parse_nodes(definitions, source)
+    return Settings(settings.simulation, nodes, settings.tenants, settings.sources, settings.origins)
+
+
+def set_node_value(settings: Settings, node_id: str, key: str, value: Any, source: str = "menu") -> None:
+    """Change one node field in place (admin node editing); on any error nothing changes.
+
+    Args:
+        settings: The settings to change.
+        node_id: The node, e.g. ``"edge-1"``.
+        key: One of ``NODE_EDITABLE``.
+        value: The new value.
+        source: Recorded in ``sources`` and used in error messages.
+
+    Raises:
+        ConfigError: For an unknown node or field, or an invalid value.
+    """
+    settings.nodes = with_node_changes(settings, {node_id: {key: value}}, source).nodes
+    if source not in settings.sources:
+        settings.sources.append(source)
 
 
 def set_value(settings: Settings, dotted: str, value: Any, source: str = "menu") -> None:
@@ -464,8 +532,10 @@ def validate_simulation(settings: Settings) -> None:
 
     number("generator.count", minimum=1, integer=True)
     number("generator.seed", integer=True)
-    for key in ("cpu_range", "memory_range", "work_range"):
+    for key in ("cpu_range", "memory_range"):
         value_range(f"generator.{key}")
+    for level in SENSITIVITIES:
+        value_range(f"generator.work_range.{level}")
     mix("generator.sensitivity_mix", list(SENSITIVITIES))
     if not sim["generator"]["sensitivity_mix"]:
         fail("generator.sensitivity_mix", "must name at least one sensitivity")
@@ -486,6 +556,18 @@ def validate_simulation(settings: Settings) -> None:
         fail("policy.soft_overload_retry", "must be true or false")
     weights("policy.capacity_weights", ("tier", "slack", "free"))
     weights("policy.topsis_weights", ("latency", "cpu", "memory"))
+
+    for tier in TIERS:
+        for key in ("cpu_cores", "memory_gb"):
+            number(f"vm.sizes.{tier}.{key}", minimum=0, inclusive_min=False)
+
+    audit_log = settings.get("security.audit_log")
+    if not isinstance(audit_log, str) or not audit_log.strip():
+        fail("security.audit_log", "must be a file path")
+
+    out_dir = settings.get("output.dir")
+    if not isinstance(out_dir, str) or not out_dir.strip():
+        fail("output.dir", "must be a folder path")
 
     number("qlearning.alpha", minimum=0, maximum=1, inclusive_min=False)
     number("qlearning.gamma", minimum=0, maximum=1)
@@ -629,6 +711,6 @@ def _is_number(value: Any) -> bool:
 def _node_definition(node: Node) -> dict[str, Any]:
     """A node's static definition as a dict, without its live usage fields."""
     data = asdict(node)
-    data.pop("cpu_used")
-    data.pop("memory_used")
+    for live in ("cpu_used", "memory_used", "cpu_load", "memory_load"):
+        data.pop(live)
     return data

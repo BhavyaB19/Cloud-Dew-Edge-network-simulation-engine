@@ -60,9 +60,9 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", parents=[shared], help="run a workload through a policy without the menu")
     run.add_argument(
         "--policy",
-        choices=["latency", "cloud", "capacity", "topsis", "qlearn"],
+        choices=["latency", "cloud", "capacity", "topsis", "all"],
         default="capacity",
-        help="placement policy (default: capacity)",
+        help="placement policy, or 'all' to compare every policy (default: capacity)",
     )
     return parser
 
@@ -160,9 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         return launch_web(options, args.port)
 
     if args.command == "run":
-        # Filled in by Phase 2 (placement engine).
-        print("'run' is not implemented yet.")
-        return 0
+        return run_command(settings, tasks, args.policy)
 
     from edgefogsim.cli import App
 
@@ -170,6 +168,33 @@ def main(argv: list[str] | None = None) -> int:
         App(settings, tasks).run()
     except (KeyboardInterrupt, EOFError):
         print("\nBye.")
+    return 0
+
+
+def run_command(settings: Settings, tasks: list[Task], policy: str) -> int:
+    """Place a workload without the menu and print the decisions (or a comparison).
+
+    Args:
+        settings: Resolved settings.
+        tasks: Tasks from ``--tasks FILE``; when empty, ``generator.count`` random
+            tasks are generated with ``generator.seed``.
+        policy: A policy key, or ``"all"`` to compare every policy.
+
+    Returns:
+        Exit status 0.
+    """
+    from rich.console import Console
+
+    from edgefogsim.cli import print_comparison, print_run
+    from edgefogsim.simulator import compare_policies, run_workload
+    from edgefogsim.workload import generate_tasks
+
+    console = Console()
+    tasks = tasks or generate_tasks(settings)
+    if policy == "all":
+        print_comparison(console, compare_policies(settings, tasks))
+    else:
+        print_run(console, run_workload(settings, tasks, policy))
     return 0
 
 

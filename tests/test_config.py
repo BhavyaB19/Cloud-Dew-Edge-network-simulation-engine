@@ -102,3 +102,22 @@ def test_bare_list_nodes_file_is_accepted(write_json):
         {"id": "fog-9", "tier": "fog", "cpu_cores": 8, "memory_gb": 8, "base_latency_ms": 15, "speed_factor": 1},
     ]))
     assert custom.nodes[0].id == "fog-9"
+
+
+def test_with_node_changes_copies_and_validates(settings):
+    """Node changes produce a new settings object; the original nodes stay as they were."""
+    import pytest
+
+    from edgefogsim.config import set_node_value, with_node_changes
+
+    changed = with_node_changes(settings, {"edge-1": {"cpu_cores": 8}})
+    assert changed.nodes[0].cpu_cores == 8 and settings.nodes[0].cpu_cores == 4
+    with pytest.raises(ConfigError, match="unknown node"):
+        with_node_changes(settings, {"edge-9": {"cpu_cores": 8}})
+    with pytest.raises(ConfigError, match="can't be changed"):
+        with_node_changes(settings, {"edge-1": {"tier": "fog"}})
+    with pytest.raises(ConfigError, match="must be > 0"):
+        set_node_value(settings, "edge-1", "cpu_cores", 0)
+    assert settings.nodes[0].cpu_cores == 4
+    set_node_value(settings, "edge-1", "base_latency_ms", 2)
+    assert settings.nodes[0].base_latency_ms == 2
