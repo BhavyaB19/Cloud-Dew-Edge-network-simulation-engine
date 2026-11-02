@@ -17,7 +17,7 @@ from edgefogsim.config import ConfigError, Settings, load_settings, parse_value
 from edgefogsim.models import Task
 from edgefogsim.workload import load_tasks
 
-COMMANDS = ("menu", "web", "run")
+COMMANDS = ("menu", "web", "run", "experiments")
 """Sub-commands; ``menu`` is assumed when none is given."""
 
 WEB_ARGS_ENV = "EDGEFOGSIM_ARGS"
@@ -53,10 +53,14 @@ def build_parser() -> argparse.ArgumentParser:
     shared.add_argument("--set", metavar="KEY=VALUE", action="append", default=[], dest="settings",
                         help="change any setting, e.g. generator.count=20 (repeatable)")
 
-    sub = parser.add_subparsers(dest="command", metavar="{menu,web,run}")
+    sub = parser.add_subparsers(dest="command", metavar="{menu,web,run,experiments}")
     sub.add_parser("menu", parents=[shared], help="interactive command-line menu (default)")
     web = sub.add_parser("web", parents=[shared], help="open the Streamlit app in your browser")
     web.add_argument("--port", type=int, default=8501, help="port for the Streamlit server (default: 8501)")
+    experiments = sub.add_parser("experiments", parents=[shared],
+                                 help="run the four required experiments and write experiments.md")
+    experiments.add_argument("--experiments", metavar="FILE", dest="experiments_file",
+                             help="experiment definitions (default: config/experiments.json)")
     run = sub.add_parser("run", parents=[shared], help="run a workload through a policy without the menu")
     run.add_argument(
         "--policy",
@@ -161,6 +165,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "run":
         return run_command(settings, tasks, args.policy)
+    if args.command == "experiments":
+        return experiments_command(settings, args.experiments_file)
 
     from edgefogsim.cli import App
 
@@ -195,6 +201,30 @@ def run_command(settings: Settings, tasks: list[Task], policy: str) -> int:
         print_comparison(console, compare_policies(settings, tasks))
     else:
         print_run(console, run_workload(settings, tasks, policy))
+    return 0
+
+
+def experiments_command(settings: Settings, experiments_file: str | None) -> int:
+    """Run E1-E4, print a summary and where the evidence and ``experiments.md`` were written.
+
+    Args:
+        settings: Resolved settings.
+        experiments_file: Optional experiment definitions file; defaults to ``config/experiments.json``.
+
+    Returns:
+        Exit status: 0 when the experiments ran (whatever their results), 2 on a definitions error.
+    """
+    from rich.console import Console
+
+    from edgefogsim.cli import print_experiments
+    from edgefogsim.experiments import EXPERIMENTS_FILE, load_experiments, run_all
+
+    try:
+        run = run_all(settings, load_experiments(experiments_file or EXPERIMENTS_FILE))
+    except ConfigError as exc:
+        print(f"Experiments error: {exc}", file=sys.stderr)
+        return 2
+    print_experiments(Console(), run)
     return 0
 
 

@@ -1,28 +1,31 @@
 {
   "experiments": {
-    "E1_policy_comparison": {
+    "E1": {
+      "title": "Policy comparison",
       "workload": {"generate": 20, "seed": 42},
+      "policies": ["latency", "cloud", "capacity", "topsis"]
+    },
+    "E2": {
+      "title": "Overload",
+      "workload": {"generate": 10, "seed": 7, "sensitivity_mix": {"high": 1.0}},
       "policies": ["latency", "capacity"],
-      "node_overrides": {}
+      "preload": {"edge-1": 0.9}
     },
-    "E2_overload": {
-      "workload": {"generate": 10, "seed": 7, "sensitivity_mix": {"high": 1.0, "medium": 0.0, "low": 0.0}},
-      "policies": ["capacity"],
-      "preload": {"edge-1": {"cpu_util": 0.9}},
-      "node_overrides": {}
-    },
-    "E3_unauthorised_access": {
+    "E3": {
+      "title": "Unauthorised tenant access",
+      "workload": {"file": "examples/tasks_sample.csv"},
+      "policy": "capacity",
       "actor": "hospital-b",
-      "target_tenant": "hospital-a",
-      "workload": {"generate": 6, "seed": 42}
+      "target_tenant": "hospital-a"
     },
-    "E4_capacity_latency_change": {
+    "E4": {
+      "title": "Node capacity and latency change",
       "workload": {"generate": 20, "seed": 42},
-      "policies": ["capacity"],
-      "node_overrides": {
-        "edge-1": {"cpu_cores": 8},
-        "cloud-1": {"base_latency_ms": 150}
-      }
+      "policy": "capacity",
+      "changes": [
+        {"edge-1": {"cpu_cores": 8}},
+        {"cloud-1": {"base_latency_ms": 150}}
+      ]
     }
   }
 }

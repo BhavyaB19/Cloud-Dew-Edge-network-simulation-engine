@@ -241,3 +241,11 @@ def test_results_page_hides_node_change_from_tenants(monkeypatch):
     at = load_and_run(open_app(monkeypatch, user="hospital-a"))
     at.sidebar.radio(key="page").set_value("Results").run()
     assert "Only the admin can change nodes." in [c.value for c in at.caption]
+
+
+def test_results_page_runs_experiments(monkeypatch):
+    """The admin runs all four experiments from the Results page and sees the summary."""
+    at = open_app(monkeypatch, user="admin", page="Results")
+    at = click(at, "Run experiments")
+    assert not at.exception
+    assert list(at.dataframe[0].value["result"]) == ["as expected"] * 4
