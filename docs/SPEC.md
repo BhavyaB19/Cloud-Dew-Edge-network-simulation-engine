@@ -19,7 +19,7 @@ This document is the source of truth. Every feature below has an ID (`F#`) and a
 | F7 | Tenant access control | Log in as a tenant (tenant ID + role, no real passwords). Tenants see only their own tasks/VMs; cross-tenant reads raise `AccessDenied` and are written to an audit log | VM & access control (15) |
 | F8 | Metrics & results | Per-task results table, per-node utilisation, total/successful/failed/rejected counts, average and p95 latency, deadline-hit rate. Saved to CSV + JSON | QoS (15) |
 | F9 | Charts | matplotlib: placements per tier by policy, node utilisation, latency distribution, before/after comparison | QoS (15) |
-| F10 | Interactive CLI | Menu-driven app covering every feature, for the live demo | Demonstration (10) |
+| F10 | Two interfaces | A **command-line menu** and a **Streamlit web app**, both covering every feature and calling the same engine code, so results are identical whichever one is used | Demonstration (10) |
 | F11 | Experiment runner | One command runs the 4 required experiments and writes setup / expected / actual / evidence to `results/experiments.md` | QoS (15), Testing (10) |
 | F12 | Tests & docs | pytest suite mapped to ACs, README, architecture diagram, report, slides, ZIP builder | Testing & docs (10), Architecture (10) |
 | F13 | User-supplied parameters | Every generated or default value (nodes, tasks, generator ranges, seed, deadlines, policy thresholds, tenants, experiment setups) comes from an editable config file and can be overridden from the CLI flags or the menu. User values always win; bad values fail with the exact file, row and field | All areas: lets the team run its own scenarios |
@@ -69,7 +69,8 @@ edgefogsim/
   simulator.py     # runs a workload through a policy, collects results (F3–F8)
   metrics.py       # pandas aggregation, CSV/JSON export                (F8)
   charts.py        # matplotlib figures                                 (F9)
-  cli.py           # interactive menu                                   (F10)
+  cli.py           # command-line menu                                  (F10)
+  web.py           # Streamlit app                                      (F10)
 config/
   nodes.json        # node definitions
   tenants.json      # tenant IDs and roles
@@ -256,6 +257,26 @@ python -m edgefogsim
     11. Switch user / Exit
 ```
 
+The same flow in the browser:
+
+```
+python -m edgefogsim web          (or: streamlit run edgefogsim/web.py)
+ │
+ ├─ Sidebar: pick tenant, see who is logged in, switch user
+ │
+ └─ Pages (sidebar navigation)
+     Nodes      table of nodes and live utilisation; [admin] edit a node
+     Workload   generate (count + seed) | upload CSV/JSON | add-task form | task table
+     Placement  choose policy, run, decision log with reasons
+     Results    results table, charts, download CSV/JSON
+     VMs        list, stop, create
+     Security   look up a task by ID → ACCESS DENIED + audit log
+     Settings   every setting with its source, edit form, download settings JSON
+     Experiments [admin] run all four, view experiments.md
+```
+
+**Rule for both interfaces:** they hold no simulation logic. They read input, call the engine modules (`config`, `workload`, `simulator`, …) and display the result. Anything that can be done in one can be done in the other, and the same settings and seed give the same numbers in both.
+
 Non-interactive commands, for scripting and experiments:
 
 ```bash
@@ -325,6 +346,8 @@ Each one is written to `results/experiments.md` with setup, expected, actual and
 | AC21 | F3 | Given two feasible nodes in the same tier, Capacity-Aware picks the one with the higher score (more free capacity), and the reason lists both scores |
 | AC22 | F3 | Given a hand-computed 3-node decision matrix, TOPSIS closeness values match the expected values to 3 decimal places |
 | AC23 | F3 | Changing `capacity_weights` or `topsis_weights` in a config file changes the choice for a constructed tie-break case, with no code change |
+| AC25 | F10 | Every Streamlit page loads without an exception for both a tenant and the admin (checked with Streamlit's `AppTest`) |
+| AC26 | F10 | The same settings and seed produce the same task table in the menu and in the Streamlit app |
 | AC24 | F3 | (Phase 7) After training with a fixed `train_seed`, Q-Learning's deadline-hit rate on the evaluation workload is ≥ Latency-First's, and two training runs with the same seed give identical Q-tables |
 
 ---
@@ -336,7 +359,7 @@ Each one is written to `results/experiments.md` with setup, expected, actual and
 | Core data model | dataclasses · pandas DataFrames · SQLite | **dataclasses** | Clear typed objects for nodes, tasks and VMs make the code easy to read and explain in the viva. Mutating per-task state in a DataFrame is awkward, and SQLite is explicitly not required |
 | Results & aggregation | built-in lists/dicts · **pandas** | **pandas** | groupby, describe and CSV/JSON export in one line each; the brief suggests it. Used only at the reporting boundary, not in the simulation loop |
 | Charts | **matplotlib** · seaborn · plotly | **matplotlib** | Required by the brief, saves static PNGs for the report and slides, no browser needed. Seaborn adds little; plotly charts are interactive, but static images go in the report anyway |
-| User interface | plain `input()` menu · **rich** + menu · Textual TUI · Streamlit | **Plain menu + `rich` for tables/colour** | Runs in any terminal, works offline at the demo, and coloured tables make decisions and ACCESS DENIED stand out. Streamlit looks nicer but adds a server, rerun-on-click state headaches and more to debug live. Textual is overkill. `rich` is a required dependency (in requirements.txt), so there is no plain-text fallback to maintain |
+| User interface | plain `input()` menu · `rich` menu · Textual TUI · Streamlit · Flask/FastAPI + HTML | **Both: `rich` command-line menu and a Streamlit app** (the brief allows either) | The menu runs in any terminal with no server, so it's the safe fallback for the live demo, and it's easy to script in tests. Streamlit gives a browser UI with tables, forms, file upload and charts in pure Python. Its rerun-on-every-click model is handled by keeping all state in `st.session_state`. Flask/FastAPI would mean writing HTML and an API the brief says isn't needed. Cost: two front ends to keep in step, kept small by putting zero logic in either |
 | CLI commands | **argparse** · click · typer | **argparse** | Standard library, enough for 3 subcommands, nothing extra to install |
 | Config | **JSON** · YAML · TOML | **JSON** | Standard library read *and* write (admin edits nodes and saves them). YAML needs PyYAML; `tomllib` is read-only |
 | Persistence | **CSV + JSON files** · SQLite | **CSV + JSON** | What the brief asks for, opens in Excel for the report, easy to diff between runs |
@@ -354,24 +377,27 @@ Each one is written to `results/experiments.md` with setup, expected, actual and
 
 ---
 
-## 9. Delivery phases — one branch and one PR each
+## 9. Delivery phases
 
-Each phase ends with a runnable app you can test by hand, plus green tests. Branch off `main`, open a PR, review, merge, then start the next phase from the updated `main`.
+Each phase ends with a runnable app and green tests. At the end of a phase the changes are left uncommitted and handed over with exact test commands and manual steps; the team tests by hand and commits. (Phases 0 and 1 used one branch and PR each; the branch names below are suggestions.)
 
 | Phase | Branch | Scope | Your manual test at the end | ACs |
 |-------|--------|-------|-----------------------------|-----|
 | 0 | `chore/project-setup` | Package skeleton, `requirements.txt`, pytest config, all four `config/*.json` default files, `examples/tasks_sample.csv`, README stub, this spec | `pip install -r requirements.txt && pytest` passes (smoke test); `python -m edgefogsim --help` prints usage | — |
 | 1 | `feature/nodes-and-workload` | F1, F2, F13 config loader + overrides, a minimal CLI (login, view nodes, generate/load/add tasks) | Log in, see 3 nodes, generate 12 tasks with seed 42 twice and get the same table, load `examples/tasks_sample.csv`, add a task by hand, swap in your own nodes file and change the seed with a flag | AC1–3, AC16–19 |
-| 2 | `feature/placement-engine` | F3 (policies A–D), F4, F5, simulator loop, decision log in the CLI | Run all four policies on the same workload and read the reasons; push Edge to overload and see an offload and a reject; change a weight in config and see a different choice | AC4–8, AC20–23 |
+| 1b | `feature/streamlit-app` | Streamlit app with the Phase 1 features (login, nodes, workload, settings), `web` command, Streamlit tests | `python -m edgefogsim web`: log in from the sidebar, generate 12 tasks with seed 42 and see the same table as the menu, upload the sample CSV, add a task with the form, change a setting and download the settings file | AC25–26 |
+| 2 | `feature/placement-engine` | F3 (policies A–D), F4, F5, simulator loop, decision log in both interfaces | Run all four policies on the same workload and read the reasons; push Edge to overload and see an offload and a reject; change a weight in config and see a different choice | AC4–8, AC20–23 |
 | 3 | `feature/vm-and-tenancy` | F6, F7, audit log, tenant-scoped views | List VMs, stop one and watch capacity return, log in as hospital-b and get denied on a hospital-a task, check `audit.log` | AC9–12 |
 | 4 | `feature/results-and-charts` | F8, F9, export, admin node editing + before/after diff | Export, open the CSV in Excel, view the PNGs, change Edge capacity and see the diff | AC13–14 |
 | 5 | `feature/experiments` | F11 runner, `experiments.md`, polished demo script | `python run_experiments.py` regenerates everything; read `experiments.md` | AC15 |
 | 6 | `docs/report-slides-package` | README final, architecture PNG, 5–8 page report, 5–7 slides, screenshots, `make_zip.py` | Follow the README on a clean venv; open the report and slides; the ZIP contains every deliverable | — |
 | 7 *(optional)* | `feature/learning-policy` | Policy E (Q-Learning), trainer, `q_table.json`, added to E1 and the report | `python -m edgefogsim train --episodes 500`, then run E1 and see Q-Learning in the comparison table and chart | AC24 |
 
+From Phase 2 on, every phase adds its feature to **both** the menu and the Streamlit app in the same PR, and the manual test is done in both.
+
 Phase 7 is a stretch goal. It starts only after Phase 6 is merged, so the required deliverables are never at risk; if there's time it can land before the report is finalised.
 
-**PR checklist (every phase):** tests green · README run instructions updated · ACs ticked in the PR description · manual-test steps listed so the reviewer can repeat them · no generated `results/` files committed except the final evidence pack in Phase 6.
+**Hand-over checklist (every phase):** tests green (including the docstring check) · every new module, class and function has a docstring (Google style: Args / Returns / Raises) · README run instructions updated · ACs covered listed in the hand-over · manual-test steps listed so anyone can repeat them · no generated `results/` files committed except the final evidence pack in Phase 6.
 
 ---
 

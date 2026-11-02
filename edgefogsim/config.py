@@ -1,8 +1,17 @@
-"""Load, merge and validate settings.
+"""Load, merge, validate and save every user-editable setting.
 
-Precedence, lowest to highest:
-built-in defaults -> files in config/ -> a --config file -> command-line overrides -> menu edits.
-Every value remembers where it came from, so a bad value is reported with its source.
+Settings come in layers. Later layers win:
+
+1. Built-in defaults in this module (used only if a file is missing).
+2. Files in ``config/``: ``simulation.json``, ``nodes.json``, ``tenants.json``.
+3. A ``--config`` file with any subset of those keys.
+4. A ``--nodes`` file that replaces the node list.
+5. Command-line overrides (``--seed``, ``--set KEY=VALUE``, ...).
+6. Edits made in the menu or the Streamlit app (:func:`set_value`).
+
+Every value remembers which layer set it (``Settings.origins``), so a bad value
+is reported with the file or layer it came from, the dotted key and the reason,
+e.g. ``mine.json, qos.deadlines_ms.low: must be > 0 (got -5)``.
 """
 
 import copy
@@ -14,7 +23,10 @@ from typing import Any
 from edgefogsim.models import ROLES, SENSITIVITIES, TIERS, Node, Tenant
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+"""Folder holding the project's default settings files."""
+
 DEFAULTS_SOURCE = "built-in defaults"
+"""Origin label for values that no file or override has changed."""
 
 DEFAULT_SIMULATION: dict[str, Any] = {
     "generator": {
@@ -71,6 +83,13 @@ class ConfigError(ValueError):
     """A setting is missing, unknown or invalid. The message names where it came from."""
 
     def __init__(self, source: str, location: str, message: str):
+        """Build the error.
+
+        Args:
+            source: Where the bad value came from: a file path, "command line" or "menu".
+            location: The dotted key, list index or row that is wrong, e.g. ``nodes[0].cpu_cores``.
+            message: What is wrong, in plain words.
+        """
         super().__init__(f"{source}, {location}: {message}")
         self.source = source
         self.location = location
@@ -78,6 +97,17 @@ class ConfigError(ValueError):
 
 @dataclass
 class Settings:
+    """All resolved settings for one run.
+
+    Attributes:
+        simulation: Nested dict shaped like ``config/simulation.json``
+            (``generator``, ``qos``, ``policy``, ``qlearning``).
+        nodes: The nodes to simulate, with live usage starting at zero.
+        tenants: Everyone who can log in.
+        sources: Every layer that contributed, lowest precedence first.
+        origins: Dotted setting path -> the layer that last set it.
+    """
+
     simulation: dict[str, Any]
     nodes: list[Node]
     tenants: list[Tenant]
@@ -85,12 +115,31 @@ class Settings:
     origins: dict[str, str] = field(default_factory=dict)
 
     def get(self, dotted: str) -> Any:
+        """Read one setting by its dotted path.
+
+        Args:
+            dotted: Path such as ``"qos.deadlines_ms.high"``.
+
+        Returns:
+            The value at that path (a number, list or dict).
+
+        Raises:
+            KeyError: If the path does not exist.
+        """
         value: Any = self.simulation
         for part in dotted.split("."):
             value = value[part]
         return value
 
     def tenant(self, tenant_id: str) -> Tenant | None:
+        """Find a tenant by id.
+
+        Args:
+            tenant_id: The id to look up, e.g. ``"hospital-a"``.
+
+        Returns:
+            The matching tenant, or None if there is no such tenant.
+        """
         return next((t for t in self.tenants if t.tenant_id == tenant_id), None)
 
 
@@ -100,7 +149,25 @@ def load_settings(
     nodes_file: Path | str | None = None,
     overrides: dict[str, Any] | None = None,
 ) -> Settings:
-    """Build validated settings from every layer, lowest precedence first."""
+    """Build validated settings from every layer, lowest precedence first.
+
+    Args:
+        config_dir: Folder with the default ``simulation.json``, ``nodes.json`` and
+            ``tenants.json``. Missing files fall back to the built-in defaults.
+        config_file: Optional user file overriding any subset of the simulation
+            settings; it may also contain ``nodes`` and ``tenants`` lists.
+        nodes_file: Optional file replacing the node list, either
+            ``{"nodes": [...]}`` or a bare list.
+        overrides: Dotted path -> value, e.g. ``{"generator.seed": 7}``,
+            usually built from command-line flags.
+
+    Returns:
+        Fully validated settings, with ``origins`` recording where each value came from.
+
+    Raises:
+        ConfigError: If any file is missing or malformed, a key is unknown, or a
+            value is invalid. The message names the source, key and reason.
+    """
     config_dir = Path(config_dir)
     simulation = copy.deepcopy(DEFAULT_SIMULATION)
     origins: dict[str, str] = {}
@@ -149,7 +216,20 @@ def load_settings(
 
 
 def set_value(settings: Settings, dotted: str, value: Any, source: str = "menu") -> None:
-    """Change one setting in place; on any validation error nothing changes."""
+    """Change one setting in place, as the menu and Streamlit app do.
+
+    The change is validated on a copy first, so on any error the settings are
+    left exactly as they were.
+
+    Args:
+        settings: The settings to change.
+        dotted: Path of the setting, e.g. ``"generator.seed"``.
+        value: The new value, already converted (see :func:`parse_value`).
+        source: Label recorded as the value's origin.
+
+    Raises:
+        ConfigError: If the path is unknown or the new value is invalid.
+    """
     trial = Settings(
         copy.deepcopy(settings.simulation),
         settings.nodes,
@@ -166,21 +246,80 @@ def set_value(settings: Settings, dotted: str, value: Any, source: str = "menu")
 
 
 def save_settings(settings: Settings, path: Path | str) -> Path:
-    """Write the resolved settings, so a run can be repeated exactly."""
+    """Write the resolved settings to JSON, so a run can be repeated exactly.
+
+    The file has the same shape as a ``--config`` file (plus ``nodes``,
+    ``tenants`` and an informational ``sources`` list), so it can be passed
+    straight back with ``--config``.
+
+    Args:
+        settings: The settings to save.
+        path: Destination file; parent folders are created if needed.
+
+    Returns:
+        The path written.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(settings_as_json(settings))
+    return path
+
+
+def settings_as_json(settings: Settings) -> str:
+    """Serialise settings in the ``--config`` file format.
+
+    Args:
+        settings: The settings to serialise.
+
+    Returns:
+        Indented JSON text with the simulation settings, ``nodes``, ``tenants``
+        and an informational ``sources`` list.
+    """
     data = {
         **settings.simulation,
         "nodes": [_node_definition(n) for n in settings.nodes],
         "tenants": [asdict(t) for t in settings.tenants],
         "sources": settings.sources,
     }
-    path.write_text(json.dumps(data, indent=2) + "\n")
-    return path
+    return json.dumps(data, indent=2) + "\n"
+
+
+def describe_settings(settings: Settings) -> list[tuple[str, Any, str]]:
+    """List every individual setting for display.
+
+    Args:
+        settings: The settings to describe.
+
+    Returns:
+        ``(dotted path, value, source)`` for each leaf setting, in file order.
+        File sources are shortened to the file name, e.g. ``simulation.json``.
+    """
+    rows = []
+
+    def walk(data: dict, prefix: str) -> None:
+        """Append a row per leaf value under ``data``."""
+        for key, value in data.items():
+            path = f"{prefix}{key}"
+            if isinstance(value, dict) and value:
+                walk(value, f"{path}.")
+            else:
+                source = origin_of(settings.origins, path)
+                rows.append((path, value, Path(source).name if "/" in source else source))
+
+    walk(settings.simulation, "")
+    return rows
 
 
 def parse_value(text: str) -> Any:
-    """Turn a command-line or menu value into JSON types: 40 -> int, true -> bool, [1,2] -> list."""
+    """Convert text typed by a user into a JSON value.
+
+    Args:
+        text: Raw text, e.g. ``"40"``, ``"true"``, ``"[1, 4]"`` or ``"edge"``.
+
+    Returns:
+        The parsed JSON value (``40``, ``True``, ``[1, 4]``), or the original
+        text when it is not valid JSON (``"edge"``).
+    """
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -188,6 +327,20 @@ def parse_value(text: str) -> Any:
 
 
 def parse_nodes(raw: Any, source: str) -> list[Node]:
+    """Validate raw node definitions and build Node objects.
+
+    Args:
+        raw: List of dicts with ``id, tier, cpu_cores, memory_gb,
+            base_latency_ms, speed_factor``. Any number of nodes per tier is allowed.
+        source: File or layer the list came from, used in error messages.
+
+    Returns:
+        The nodes, in file order, with zero usage.
+
+    Raises:
+        ConfigError: On a missing or unknown field, duplicate id, unknown tier,
+            or a non-positive size or speed.
+    """
     if not isinstance(raw, list) or not raw:
         raise ConfigError(source, "nodes", "must be a non-empty list of nodes")
     required = ("id", "tier", "cpu_cores", "memory_gb", "base_latency_ms", "speed_factor")
@@ -213,6 +366,19 @@ def parse_nodes(raw: Any, source: str) -> list[Node]:
 
 
 def parse_tenants(raw: Any, source: str) -> list[Tenant]:
+    """Validate raw tenant definitions and build Tenant objects.
+
+    Args:
+        raw: List of dicts with ``tenant_id`` and ``role`` ("tenant" or "admin").
+        source: File or layer the list came from, used in error messages.
+
+    Returns:
+        The tenants, in file order.
+
+    Raises:
+        ConfigError: On a missing or unknown field, duplicate id, unknown role,
+            or when no tenant has the "tenant" role.
+    """
     if not isinstance(raw, list) or not raw:
         raise ConfigError(source, "tenants", "must be a non-empty list of tenants")
     tenants, seen = [], set()
@@ -236,13 +402,24 @@ def parse_tenants(raw: Any, source: str) -> list[Tenant]:
 
 
 def validate_simulation(settings: Settings) -> None:
+    """Check every simulation setting's type and range.
+
+    Args:
+        settings: Settings whose ``simulation`` dict has been fully merged.
+
+    Raises:
+        ConfigError: For the first invalid value found, naming the layer that
+            set it (from ``settings.origins``), its dotted path and the rule broken.
+    """
     sim, origins = settings.simulation, settings.origins
 
     def fail(path: str, message: str) -> None:
+        """Raise a ConfigError for ``path``, blaming the layer that set it."""
         raise ConfigError(origin_of(origins, path), path, message)
 
     def number(path: str, minimum: float | None = None, maximum: float | None = None,
                inclusive_min: bool = True, integer: bool = False) -> None:
+        """Require a number at ``path``, optionally whole and within bounds."""
         value = settings.get(path)
         if integer and (not isinstance(value, int) or isinstance(value, bool)):
             fail(path, f"must be a whole number (got {value!r})")
@@ -254,6 +431,7 @@ def validate_simulation(settings: Settings) -> None:
             fail(path, f"must be <= {maximum} (got {value})")
 
     def value_range(path: str) -> None:
+        """Require ``[min, max]`` with ``0 < min <= max`` at ``path``."""
         value = settings.get(path)
         if not (isinstance(value, list) and len(value) == 2 and all(_is_number(v) for v in value)):
             fail(path, f"must be [min, max] (got {value!r})")
@@ -261,6 +439,7 @@ def validate_simulation(settings: Settings) -> None:
             fail(path, f"needs 0 < min <= max (got {value})")
 
     def weights(path: str, keys: tuple[str, ...]) -> None:
+        """Require non-negative weights for exactly ``keys``, not all zero."""
         mapping = settings.get(path)
         if not isinstance(mapping, dict):
             fail(path, "must be an object")
@@ -272,6 +451,7 @@ def validate_simulation(settings: Settings) -> None:
             fail(path, "weights must not all be 0")
 
     def mix(path: str, allowed: list[str]) -> None:
+        """Require non-negative shares keyed by names from ``allowed``."""
         mapping = settings.get(path)
         if not isinstance(mapping, dict):
             fail(path, "must be an object")
@@ -315,6 +495,21 @@ def validate_simulation(settings: Settings) -> None:
 
 
 def _merge(target: dict, incoming: Any, prefix: str, source: str, origins: dict[str, str]) -> None:
+    """Deep-merge ``incoming`` into ``target``, rejecting unknown keys.
+
+    Nested groups merge key by key; leaf values, lists and the maps in
+    ``FREE_KEY_MAPS`` are replaced whole.
+
+    Args:
+        target: Settings dict to update in place.
+        incoming: Dict read from a file.
+        prefix: Dotted path of ``target`` within the full settings ("" at the top).
+        source: Layer name recorded in ``origins`` and used in errors.
+        origins: Origin map to update.
+
+    Raises:
+        ConfigError: If ``incoming`` is not a dict or contains an unknown key.
+    """
     if not isinstance(incoming, dict):
         raise ConfigError(source, prefix or "top level", "must be a JSON object")
     for key, value in incoming.items():
@@ -329,6 +524,22 @@ def _merge(target: dict, incoming: Any, prefix: str, source: str, origins: dict[
 
 
 def _set_path(target: dict, dotted: str, value: Any, source: str, origins: dict[str, str]) -> None:
+    """Set one existing setting by dotted path.
+
+    New keys are only allowed inside ``FREE_KEY_MAPS`` (e.g. a new tenant's
+    share in ``generator.tenant_mix``). A whole group such as ``qos`` cannot be
+    replaced this way, to avoid wiping its other keys by accident.
+
+    Args:
+        target: Settings dict to update in place.
+        dotted: Path such as ``"policy.headroom"``.
+        value: New value.
+        source: Layer name recorded in ``origins`` and used in errors.
+        origins: Origin map to update.
+
+    Raises:
+        ConfigError: If the path is unknown or names a group.
+    """
     parts = dotted.split(".")
     node = target
     for i, part in enumerate(parts[:-1]):
@@ -346,6 +557,7 @@ def _set_path(target: dict, dotted: str, value: Any, source: str, origins: dict[
 
 
 def _record(origins: dict[str, str], path: str, value: Any, source: str) -> None:
+    """Record ``source`` as the origin of ``path`` and of every key nested under it."""
     for key in [k for k in origins if k.startswith(f"{path}.")]:
         del origins[key]
     origins[path] = source
@@ -355,6 +567,16 @@ def _record(origins: dict[str, str], path: str, value: Any, source: str) -> None
 
 
 def origin_of(origins: dict[str, str], path: str) -> str:
+    """Find which layer set a value.
+
+    Args:
+        origins: Origin map from ``Settings.origins``.
+        path: Dotted setting path.
+
+    Returns:
+        The origin of ``path`` or of its nearest recorded parent, or
+        ``DEFAULTS_SOURCE`` if nothing overrode it.
+    """
     while path:
         if path in origins:
             return origins[path]
@@ -363,6 +585,7 @@ def origin_of(origins: dict[str, str], path: str) -> str:
 
 
 def _read_json(path: Path) -> Any:
+    """Read a JSON file, turning file and syntax errors into ConfigError."""
     try:
         return json.loads(Path(path).read_text())
     except FileNotFoundError:
@@ -372,7 +595,7 @@ def _read_json(path: Path) -> Any:
 
 
 def _list_from(data: Any, key: str, source: Path | str) -> Any:
-    """Accept either {"nodes": [...]} or a bare [...]."""
+    """Return ``data[key]`` for ``{"nodes": [...]}``-style files, or ``data`` itself for a bare list."""
     if isinstance(data, dict):
         if key not in data:
             raise ConfigError(str(source), key, "is missing")
@@ -381,6 +604,7 @@ def _list_from(data: Any, key: str, source: Path | str) -> Any:
 
 
 def _check_fields(item: dict, required: tuple[str, ...], source: str, where: str) -> None:
+    """Raise ConfigError if ``item`` lacks any ``required`` field or has an extra one."""
     for key in required:
         if key not in item:
             raise ConfigError(source, f"{where}.{key}", "is missing")
@@ -390,6 +614,7 @@ def _check_fields(item: dict, required: tuple[str, ...], source: str, where: str
 
 
 def _require_number(value: Any, source: str, where: str, minimum: float, inclusive: bool = True) -> None:
+    """Raise ConfigError unless ``value`` is a number >= ``minimum`` (or > when not inclusive)."""
     if not _is_number(value):
         raise ConfigError(source, where, f"must be a number (got {value!r})")
     if value < minimum or (not inclusive and value == minimum):
@@ -397,10 +622,12 @@ def _require_number(value: Any, source: str, where: str, minimum: float, inclusi
 
 
 def _is_number(value: Any) -> bool:
+    """True for ints and floats; False for bools, which Python treats as ints."""
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _node_definition(node: Node) -> dict[str, Any]:
+    """A node's static definition as a dict, without its live usage fields."""
     data = asdict(node)
     data.pop("cpu_used")
     data.pop("memory_used")

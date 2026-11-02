@@ -1,4 +1,14 @@
-"""Create workloads: seeded random generation, task files (CSV/JSON) and manual entry."""
+"""Build workloads (lists of tasks) in three ways.
+
+1. :func:`generate_tasks`: random tasks from the ``generator`` settings. The
+   same seed always gives the same tasks, so policy comparisons are fair.
+2. :func:`load_tasks`: a CSV or JSON file the user wrote, e.g. in Excel
+   (see ``examples/tasks_sample.csv``).
+3. :func:`make_task`: one task typed into the menu or the Streamlit form.
+
+Files and typed tasks are validated row by row. A bad value raises
+:class:`WorkloadError` naming the file, row and column.
+"""
 
 import csv
 import json
@@ -10,6 +20,7 @@ from edgefogsim.config import ConfigError, Settings
 from edgefogsim.models import SENSITIVITIES, Task
 
 TASK_FIELDS = ("id", "tenant_id", "cpu_cores", "memory_gb", "sensitivity", "work_units")
+"""Columns of a task file, in order. ``id`` may be left blank for automatic numbering."""
 
 
 class WorkloadError(ConfigError):
@@ -22,7 +33,22 @@ def generate_tasks(
     seed: int | None = None,
     existing: Iterable[Task] = (),
 ) -> list[Task]:
-    """Random tasks drawn from the generator settings. The same seed gives the same tasks."""
+    """Create random tasks from the ``generator`` settings.
+
+    CPU, memory and work units are drawn uniformly from their configured
+    ranges (whole numbers when both bounds are whole). Tenant and sensitivity
+    are drawn using their configured shares; an empty ``tenant_mix`` splits
+    tasks evenly across all non-admin tenants.
+
+    Args:
+        settings: Resolved settings; reads ``simulation["generator"]`` and the tenants.
+        count: Number of tasks; defaults to ``generator.count``.
+        seed: Random seed; defaults to ``generator.seed``.
+        existing: Tasks already in the workload, so new ids continue after them.
+
+    Returns:
+        The new tasks, with ids ``T01``, ``T02``, ... (continuing after ``existing``).
+    """
     gen = settings.simulation["generator"]
     count = gen["count"] if count is None else count
     rng = random.Random(gen["seed"] if seed is None else seed)
@@ -48,7 +74,24 @@ def generate_tasks(
 
 
 def load_tasks(path: Path | str, settings: Settings, existing: Iterable[Task] = ()) -> list[Task]:
-    """Read tasks from a CSV or JSON file, validating every row."""
+    """Read and validate tasks from a CSV or JSON file.
+
+    A CSV needs the header in ``TASK_FIELDS``. A JSON file holds a list of task
+    objects, or ``{"tasks": [...]}``. Sensitivity is case-insensitive; blank ids
+    are numbered automatically.
+
+    Args:
+        path: The ``.csv`` or ``.json`` file.
+        settings: Resolved settings; used to check tenant ids.
+        existing: Tasks already in the workload, to avoid duplicate ids.
+
+    Returns:
+        The tasks in file order.
+
+    Raises:
+        WorkloadError: If the file is missing, empty, of another type, or any row
+            is invalid. The message names the file, row (and CSV line) and column.
+    """
     path = Path(path)
     source = str(path)
     if not path.exists():
@@ -78,12 +121,40 @@ def load_tasks(path: Path | str, settings: Settings, existing: Iterable[Task] = 
 
 def make_task(raw: dict[str, Any], settings: Settings, existing: Iterable[Task] = (),
               source: str = "manual entry") -> Task:
-    """Validate one task typed in by hand. A blank id is numbered automatically."""
+    """Validate and build one task typed in by hand.
+
+    Args:
+        raw: Field name -> value, as typed (strings are fine, e.g. ``"2"``).
+            A blank or missing ``id`` is numbered automatically.
+        settings: Resolved settings; used to check the tenant id.
+        existing: Tasks already in the workload, to avoid duplicate ids.
+        source: Label used in error messages.
+
+    Returns:
+        The new task.
+
+    Raises:
+        WorkloadError: If any field is missing or invalid.
+    """
     return _build_tasks([("task", raw)], settings, source, existing)[0]
 
 
 def _build_tasks(rows: list[tuple[str, Any]], settings: Settings, source: str,
                  existing: Iterable[Task]) -> list[Task]:
+    """Validate rows and turn them into tasks; shared by file loading and manual entry.
+
+    Args:
+        rows: ``(location label, raw dict)`` pairs, e.g. ``("row 4 (line 5)", {...})``.
+        settings: Resolved settings; used to check tenant ids.
+        source: File name or label used in error messages.
+        existing: Tasks already in the workload, to avoid duplicate ids.
+
+    Returns:
+        One task per row.
+
+    Raises:
+        WorkloadError: On the first invalid row, naming its location and column.
+    """
     existing = list(existing)
     used = {t.id for t in existing}
     ids = _id_sequence(existing)
@@ -127,6 +198,11 @@ def _build_tasks(rows: list[tuple[str, Any]], settings: Settings, source: str,
 
 
 def _positive(value: Any, source: str, where: str) -> float:
+    """Parse a positive number from a cell, as an int when it is whole.
+
+    Raises:
+        WorkloadError: If the value is not a number or is <= 0.
+    """
     try:
         number = float(value)
     except (TypeError, ValueError):
@@ -137,7 +213,7 @@ def _positive(value: Any, source: str, where: str) -> float:
 
 
 def _draw(rng: random.Random, bounds: list[float]) -> float:
-    """Whole numbers when both bounds are whole, otherwise one decimal place."""
+    """Draw a value in ``[low, high]``: a whole number when both bounds are whole, else rounded to 0.1."""
     low, high = bounds
     if isinstance(low, int) and isinstance(high, int):
         return rng.randint(low, high)
@@ -145,7 +221,7 @@ def _draw(rng: random.Random, bounds: list[float]) -> float:
 
 
 def _id_sequence(existing: Iterable[Task]):
-    """Yield T01, T02, ... continuing after the highest existing T-number."""
+    """Yield ``T01``, ``T02``, ... starting after the highest ``T<number>`` id in ``existing``."""
     highest = 0
     for task in existing:
         if task.id[:1] == "T" and task.id[1:].isdigit():

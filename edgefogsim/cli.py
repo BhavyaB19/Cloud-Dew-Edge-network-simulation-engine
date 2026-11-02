@@ -1,22 +1,49 @@
-"""Interactive menu for the live demo."""
+"""Command-line menu: one of the two user interfaces (the other is the Streamlit app in ``web``).
 
-from pathlib import Path
+The menu holds no simulation logic. Each option reads input, calls the engine
+modules (``config``, ``workload``, ...) and prints the result with ``rich``
+tables. Input goes through an ``ask`` function, so tests can script a whole
+session (see ``tests/test_cli.py``).
+"""
+
 from typing import Callable
 
 from rich.console import Console
 from rich.table import Table
 
-from edgefogsim.config import ConfigError, Settings, origin_of, parse_value, save_settings, set_value
+from edgefogsim.config import ConfigError, Settings, describe_settings, parse_value, save_settings, set_value
 from edgefogsim.models import Task, Tenant
 from edgefogsim.workload import generate_tasks, load_tasks, make_task
 
 SENSITIVITY_STYLE = {"high": "bold red", "medium": "yellow", "low": "green"}
+"""Colour for each sensitivity level in tables."""
+
 TIER_STYLE = {"edge": "cyan", "fog": "magenta", "cloud": "blue"}
+"""Colour for each node tier in tables."""
 
 
 class App:
+    """The interactive menu and the state of one session.
+
+    Attributes:
+        settings: Resolved settings; menu edits change them in place.
+        tasks: The current workload.
+        console: ``rich`` console that all output goes to.
+        ask: Function that shows a prompt and returns the user's answer.
+        user: Who is logged in, or None before login.
+    """
+
     def __init__(self, settings: Settings, tasks: list[Task] | None = None,
                  console: Console | None = None, ask: Callable[[str], str] | None = None):
+        """Set up a session.
+
+        Args:
+            settings: Resolved settings from :func:`edgefogsim.config.load_settings`.
+            tasks: Optional starting workload, e.g. from ``--tasks FILE``.
+            console: Where to print; defaults to the terminal.
+            ask: Prompt function; defaults to ``console.input``. Tests pass a
+                function that returns scripted answers.
+        """
         self.settings = settings
         self.tasks: list[Task] = list(tasks or [])
         self.console = console or Console()
@@ -24,6 +51,7 @@ class App:
         self.user: Tenant | None = None
 
     def run(self) -> None:
+        """Log in, then show the main menu until the user chooses Exit."""
         self.console.print("[bold]EdgeFogSim[/bold]: Edge / Fog / Cloud placement simulator")
         self.login()
         actions = [
@@ -54,6 +82,7 @@ class App:
                 self.console.print(f"[red]'{choice}' is not an option.[/red]")
 
     def login(self) -> None:
+        """Ask who the user is (by number or tenant id) until a valid tenant is chosen."""
         tenants = self.settings.tenants
         self.console.print("\nWho are you?")
         for number, tenant in enumerate(tenants, start=1):
@@ -70,6 +99,7 @@ class App:
             self.console.print(f"[red]No tenant '{choice}'.[/red]")
 
     def show_nodes(self) -> None:
+        """Print every node's size, usage, latency, speed and CPU utilisation."""
         table = Table(title="Nodes")
         for column in ("Node", "Tier", "CPU used / cores", "Memory used / GB", "Latency ms", "Speed", "CPU util"):
             table.add_column(column, justify="left" if column in ("Node", "Tier") else "right")
@@ -81,6 +111,7 @@ class App:
         self.console.print(table)
 
     def generate(self) -> None:
+        """Ask for a count and seed, then replace the workload with random tasks."""
         gen = self.settings.simulation["generator"]
         count = self._ask_int("How many tasks", gen["count"], minimum=1)
         seed = self._ask_int("Seed", gen["seed"])
@@ -89,6 +120,7 @@ class App:
         self.show_tasks()
 
     def load(self) -> None:
+        """Ask for a CSV/JSON file and replace the workload with its tasks; print any row error."""
         path = self.ask("Task file (.csv or .json) [examples/tasks_sample.csv]: ").strip() or "examples/tasks_sample.csv"
         try:
             self.tasks = load_tasks(path, self.settings)
@@ -99,6 +131,7 @@ class App:
         self.show_tasks()
 
     def add_task(self) -> None:
+        """Ask for each task field and append the task; a tenant defaults to themselves as owner."""
         default_tenant = self.user.tenant_id if self.user.role == "tenant" else ""
         raw = {
             "id": self.ask("Task id [auto]: ").strip(),
@@ -117,6 +150,7 @@ class App:
         self.console.print(f"[green]Added {task.id}.[/green]")
 
     def show_tasks(self) -> None:
+        """Print the current workload as a table."""
         if not self.tasks:
             self.console.print("No tasks yet. Generate, load or add some first.")
             return
@@ -130,16 +164,18 @@ class App:
         self.console.print(table)
 
     def show_settings(self) -> None:
+        """Print every setting, its value and which layer set it."""
         table = Table(title="Settings")
         table.add_column("Setting", no_wrap=True)
         table.add_column("Value")
         table.add_column("From", style="dim")
-        for path, value in _flatten(self.settings.simulation):
-            table.add_row(path, str(value), _source(self.settings.origins, path))
+        for path, value, source in describe_settings(self.settings):
+            table.add_row(path, str(value), source)
         self.console.print(table)
         self.console.print("[dim]Change any of these with option 7, a --config file, or --set KEY=VALUE.[/dim]")
 
     def change_setting(self) -> None:
+        """Ask for a dotted setting and a new value, validate and apply it; print any error."""
         path = self.ask("Setting (e.g. generator.seed or qos.deadlines_ms.high): ").strip()
         if not path:
             return
@@ -152,11 +188,13 @@ class App:
         self.console.print(f"[green]{path} = {value!r}[/green]")
 
     def save(self) -> None:
+        """Save the current settings to a JSON file reusable with ``--config``."""
         path = self.ask("Save to [my_settings.json]: ").strip() or "my_settings.json"
         saved = save_settings(self.settings, path)
         self.console.print(f"[green]Saved to {saved}. Reuse it with --config {saved}.[/green]")
 
     def _ask_int(self, label: str, default: int, minimum: int | None = None) -> int:
+        """Ask for a whole number until one is given; an empty answer returns ``default``."""
         while True:
             text = self.ask(f"{label} [{default}]: ").strip()
             if not text:
@@ -167,18 +205,5 @@ class App:
 
 
 def _fmt(value: float) -> str:
+    """Format a number compactly: 4.0 -> "4", 0.5 -> "0.5"."""
     return f"{value:g}"
-
-
-def _flatten(data: dict, prefix: str = ""):
-    for key, value in data.items():
-        path = f"{prefix}{key}"
-        if isinstance(value, dict) and value:
-            yield from _flatten(value, f"{path}.")
-        else:
-            yield path, value
-
-
-def _source(origins: dict[str, str], path: str) -> str:
-    source = origin_of(origins, path)
-    return Path(source).name if "/" in source else source

@@ -13,12 +13,14 @@ CONFIG = ROOT / "config"
 
 
 def test_package_imports():
+    """The package imports and has a version."""
     import edgefogsim
 
     assert edgefogsim.__version__
 
 
 def test_cli_help_runs():
+    """``python -m edgefogsim --help`` exits 0 and prints usage."""
     result = subprocess.run(
         [sys.executable, "-m", "edgefogsim", "--help"],
         cwd=ROOT,
@@ -39,16 +41,19 @@ def test_cli_help_runs():
     ],
 )
 def test_config_file_is_valid_json(filename, top_key):
+    """Each default config file is valid JSON with its expected top-level key."""
     data = json.loads((CONFIG / filename).read_text())
     assert top_key in data
 
 
 def test_default_nodes_cover_every_tier():
+    """The default nodes include exactly one edge, fog and cloud node."""
     nodes = json.loads((CONFIG / "nodes.json").read_text())["nodes"]
     assert sorted(n["tier"] for n in nodes) == ["cloud", "edge", "fog"]
 
 
 def test_sample_tasks_csv_has_required_columns():
+    """The sample task CSV has the task columns and at least 10 rows."""
     with open(ROOT / "examples" / "tasks_sample.csv", newline="") as f:
         reader = csv.DictReader(f)
         rows = list(reader)

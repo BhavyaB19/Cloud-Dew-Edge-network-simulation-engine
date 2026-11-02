@@ -1,3 +1,5 @@
+"""Layered settings: precedence, partial overrides, user node files and validation errors (AC16-19)."""
+
 import json
 
 import pytest
@@ -77,12 +79,14 @@ def test_invalid_values_name_file_key_and_reason(write_json, kwargs_factory, exp
 
 
 def test_free_key_maps_are_replaced_not_merged(write_json):
+    """Overriding sensitivity_mix replaces it whole instead of merging shares."""
     custom = load_settings(config_file=write_json("only_high.json",
                                                   {"generator": {"sensitivity_mix": {"high": 1.0}}}))
     assert custom.get("generator.sensitivity_mix") == {"high": 1.0}
 
 
 def test_set_value_applies_or_leaves_settings_untouched(settings):
+    """set_value applies a valid edit and leaves settings unchanged on an invalid one."""
     set_value(settings, "qos.deadlines_ms.medium", 120)
     assert settings.get("qos.deadlines_ms.medium") == 120
     assert settings.origins["qos.deadlines_ms.medium"] == "menu"
@@ -93,6 +97,7 @@ def test_set_value_applies_or_leaves_settings_untouched(settings):
 
 
 def test_bare_list_nodes_file_is_accepted(write_json):
+    """A nodes file may be a bare list instead of {"nodes": [...]}."""
     custom = load_settings(nodes_file=write_json("bare.json", [
         {"id": "fog-9", "tier": "fog", "cpu_cores": 8, "memory_gb": 8, "base_latency_ms": 15, "speed_factor": 1},
     ]))

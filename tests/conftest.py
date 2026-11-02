@@ -1,3 +1,5 @@
+"""Shared pytest fixtures: default settings and a helper to write JSON files."""
+
 import json
 from pathlib import Path
 
@@ -19,6 +21,7 @@ def write_json(tmp_path):
     """Write a JSON file under tmp_path and return its path."""
 
     def _write(name, data):
+        """Write ``data`` as JSON to ``tmp_path / name`` and return the path."""
         path = tmp_path / name
         path.write_text(json.dumps(data))
         return path
