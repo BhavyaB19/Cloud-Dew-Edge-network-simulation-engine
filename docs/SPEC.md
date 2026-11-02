@@ -275,8 +275,9 @@ python -m edgefogsim
      Results
       14. Export results → CSV, JSON and PNG charts in results/<time>-<name>/
       15. [admin] Change a node and compare before/after → diff table + chart; optionally keep it
+      16. [admin] Run all four experiments → experiments.md + evidence
      Settings
-      16. View settings   17. Change a setting   18. Save settings   19. Switch user
+      17. View settings   18. Change a setting   19. Save settings   20. Switch user
        0. Exit
 ```
 
@@ -331,16 +332,14 @@ Success criteria: no crashes, every number on screen traceable to a CSV row, eve
 
 ## 6. Required experiments (F11)
 
+Defined in `config/experiments.json` (editable). `python run_experiments.py` runs all four into `results/<time>-experiments/`: `experiments.md` (setup, expected, actual, checks, evidence links), `experiments.json` (pass/fail per check) and one evidence folder per experiment. Expectations are written before running and checked against the actual numbers.
+
 | Exp | Setup | Expected outcome | Evidence |
 |-----|-------|------------------|----------|
-| E1 Policy comparison | Same 20-task workload (seed 42) through every policy (Latency-First, Cloud-Only, Capacity-Aware, TOPSIS, and Q-Learning if built) | Capacity-Aware and TOPSIS have a higher deadline-hit rate and more even utilisation than both baselines; Cloud-Only misses most high-sensitivity deadlines | `e1_policy_comparison.csv`, `e1_placement.png`, `e1_latency.png` |
-| E2 Overload | Edge pre-loaded to 90%, then a burst of high-sensitivity tasks | Early tasks offloaded to Fog; tasks that can't meet the deadline are rejected with a reason; nothing over-allocates | `e2_overload.csv`, decision log |
-| E3 Unauthorised access | `hospital-b` requests a `hospital-a` task and VM | `AccessDenied` raised, nothing returned, audit entry written; admin read succeeds | `e3_access.txt`, `audit.log` excerpt |
-| E4 Capacity/latency change | Baseline run, then Edge CPU ×2 and Cloud latency 80 → 150 ms, same workload | More tasks stay on Edge; low-sensitivity Cloud tasks get slower but still pass | `e4_before_after.csv`, `e4_diff.png` |
-
-Each one is written to `results/experiments.md` with setup, expected, actual and an evidence link.
-
----
+| E1 Policy comparison | 20 generated tasks (seed 42) through Latency-First, Cloud-Only, Capacity-Aware and TOPSIS | Smart policies run nothing late and get more tasks on time than both baselines | `E1/comparison.csv`, `outcomes.png`, `tiers.png`, `latency.png` |
+| E2 Overload | Edge pre-loaded to 90%, then 10 high-sensitivity tasks (seed 7); Latency-First vs Capacity-Aware | Capacity-Aware offloads some tasks and rejects (with reasons) those no node can serve in time; nothing late; no node over-allocated; at least as many on time as Latency-First | `E2/decisions_*.csv`, `outcomes.png`, `node_usage.png` |
+| E3 Unauthorised access | Sample task file placed with Capacity-Aware; hospital-b reads hospital-a's task and VM and tries to stop the VM; then admin reads them | All 3 attempts refused and logged (one audit line each); the VM keeps running; admin reads succeed | `E3/access_attempts.txt`, `E3/audit.log` |
+| E4 Node change | 20 tasks (seed 42), Capacity-Aware; (a) edge-1 CPU 4 → 8, (b) cloud-1 latency 80 → 150 ms, each vs the original | (a) Edge takes at least as many tasks, at least as many on time, no more rejected. (b) Cloud tasks slower; low tasks still on time; nothing late | `E4/a/…`, `E4/b/…` (`before_after.csv/png`, both runs' decisions) |
 
 ## 7. Acceptance criteria (become pytest cases)
 
@@ -360,7 +359,7 @@ Each one is written to `results/experiments.md` with setup, expected, actual and
 | AC12 | F7 | Given an admin session, all tenants' records are readable |
 | AC13 | F8 | total = placed + rejected; success + failed = total; exported CSV row count = total |
 | AC14 | F9 | Running the charts step creates non-empty PNGs at the expected paths |
-| AC15 | F11 | `run_experiments.py` exits 0 and writes all 4 sections to `experiments.md` |
+| AC15 | F11 | `run_experiments.py` exits 0 and writes `experiments.md` with all 4 sections (setup, expected, actual, checks, evidence), and every linked evidence file exists |
 | AC16 | F13 | Given a `--config` file that sets only `qos.deadlines_ms.high = 40`, then high deadline is 40 and every other setting equals the default |
 | AC17 | F13 | Given a config file value and a CLI flag for the same key, the flag wins; `settings_used.json` records the final value |
 | AC18 | F13 | Given a user nodes file with 2 edge nodes and no fog node, the simulator loads it and placement still follows the tier preference (skipping the missing tier) |

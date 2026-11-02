@@ -524,6 +524,25 @@ def results_page(settings: Settings, user: Tenant) -> None:
             charts.save_run_charts(run, folder)
             st.success(f"Saved to {folder}/")
 
+    st.subheader("Run all four experiments")
+    if user.is_admin:
+        st.caption("Runs E1-E4 from config/experiments.json and writes experiments.md plus evidence to the "
+                   "results folder. Your workload and nodes are not changed.")
+        if st.button("Run experiments", key="run_experiments"):
+            from edgefogsim.experiments import load_experiments, run_all, summary_frame
+
+            try:
+                run_exp = run_all(settings, load_experiments())
+            except ConfigError as exc:
+                st.error(str(exc))
+            else:
+                st.dataframe(summary_frame(run_exp), hide_index=True, width="stretch")
+                st.success(f"Write-up: {run_exp.report}")
+                st.download_button("Download experiments.md", run_exp.report.read_text(), file_name="experiments.md",
+                                   mime="text/markdown", key="dl_experiments")
+    else:
+        st.caption("Only the admin can run the experiments.")
+
     st.subheader("Change a node and compare before / after")
     if not user.is_admin:
         st.caption("Only the admin can change nodes.")

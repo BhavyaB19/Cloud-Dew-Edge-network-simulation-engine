@@ -26,14 +26,14 @@ def test_menu_login_view_nodes_generate_and_list(settings):
 
 def test_menu_change_setting_then_generate_uses_it(settings):
     """A setting changed in the menu is used by the next generation."""
-    out = run_menu(settings, ["admin", "17", "generator.count", "3", "2", "", "", "0"])
+    out = run_menu(settings, ["admin", "18", "generator.count", "3", "2", "", "", "0"])
     assert "generator.count = 3" in out
     assert "Generated 3 tasks" in out
 
 
 def test_menu_reports_bad_setting_without_crashing(settings):
     """An invalid menu edit prints the reason and the menu carries on."""
-    out = run_menu(settings, ["1", "17", "qos.deadlines_ms.high", "-1", "0"])
+    out = run_menu(settings, ["1", "18", "qos.deadlines_ms.high", "-1", "0"])
     assert "qos.deadlines_ms.high" in out and "must be > 0" in out
 
 
@@ -140,3 +140,11 @@ def test_menu_before_after_is_admin_only(settings):
     """A tenant can't change nodes."""
     out = run_menu(settings, ["hospital-a", "15", "0"])
     assert "Only the admin can change nodes" in out
+
+
+def test_menu_experiments_admin_only(settings):
+    """The admin runs all four experiments from the menu; a tenant is refused."""
+    out = run_menu(settings, ["admin", "16", "0"])
+    assert "E4 Node capacity and latency change" in out and "Write-up: results/" in out
+    out = run_menu(settings, ["hospital-a", "16", "0"])
+    assert "Only the admin can run the experiments" in out

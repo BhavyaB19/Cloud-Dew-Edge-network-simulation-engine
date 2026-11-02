@@ -2,7 +2,13 @@
 
 A locally runnable Python simulator that places computing tasks on Edge, Fog or Cloud nodes, simulates VMs and tenant isolation, and reports QoS results. ARM 305 Cloud, Dev, Edge and Fog Computing mini project.
 
-> **Status:** Phase 4 (placement, shared VMs, tenant security, results export, charts, before/after node changes). The experiment runner and report arrive in later phases. See [docs/SPEC.md](docs/SPEC.md) for the full plan.
+<p align="center">
+  <img src="docs/screenshots/web-comparison.png" alt="Streamlit policy comparison: the same 12 tasks through four policies; Capacity-Aware and TOPSIS run none late, the baselines run 5 to 7 late" width="820">
+  <br>
+  <em>The same 12 tasks through all four placement policies. The smart policies reject what they can't finish in time instead of running it late.</em>
+</p>
+
+> **Status:** Phase 5 (placement, shared VMs, tenant security, results, charts and the four required experiments). The report, slides and submission ZIP arrive in Phase 6. See [docs/SPEC.md](docs/SPEC.md) for the full plan.
 
 ## Setup
 
@@ -94,6 +100,23 @@ Menu option 14 (or the app's **Results** page) saves the last run and the last p
 
 As admin, menu option 15 (or the Results page) changes one node field, for example `edge-1 cpu_cores 8` or `cloud-1 base_latency_ms 150`, runs the same workload again and shows what changed. You can then keep the change for the rest of the session. A tenant's export contains only their own decisions and VMs.
 
+## Experiments
+
+The four experiments the brief requires run with one command:
+
+```bash
+python run_experiments.py
+```
+
+| Experiment | What it shows |
+|------------|---------------|
+| E1 Policy comparison | The same 20 tasks through all four policies: the smart policies run nothing late and get more tasks on time |
+| E2 Overload | Edge already 90% busy, then 10 urgent tasks: Capacity-Aware moves tasks to Fog or rejects them with a reason; Latency-First runs 9 of 10 late |
+| E3 Unauthorised access | hospital-b tries to read and stop hospital-a's task and VM: all 3 attempts are refused and logged; the admin can read them |
+| E4 Node change | (a) Edge CPU 4 → 8: more tasks on Edge and on time. (b) Cloud latency 80 → 150 ms: Cloud tasks slow down, medium tasks can't use it any more, low tasks still finish on time |
+
+Each experiment states its expected outcome, runs, then checks the expectation against the actual numbers. The output folder `results/<time>-experiments/` holds `experiments.md` (setup, expected outcome, actual outcome with tables and charts, checks, evidence links) and one evidence folder per experiment. Change the workloads or node changes in `config/experiments.json`, or pass your own file with `--experiments my_experiments.json`. The admin can also run them from menu option 16 or the app's Results page.
+
 ## Test
 
 ```bash
@@ -117,8 +140,8 @@ Every default lives in `config/`. Edit those files, or override them without tou
 
 1. `--config my_settings.json`: any subset of `config/simulation.json`, plus optional `nodes` and `tenants` lists.
 2. Command-line options (table above).
-3. Menu option 17 or the app's Settings page to change a setting, then menu option 18 or the app's download button to save everything to a file you can reuse with `--config`.
+3. Menu option 18 or the app's Settings page to change a setting, then menu option 19 or the app's download button to save everything to a file you can reuse with `--config`.
 
-Later layers win. Menu option 16 and the app's Settings page show every setting and where its value came from. A bad value stops with the file, row or key, and the reason, e.g. `my_tasks.csv, row 4 (line 5), cpu_cores: must be > 0 (got -2)`.
+Later layers win. Menu option 17 and the app's Settings page show every setting and where its value came from. A bad value stops with the file, row or key, and the reason, e.g. `my_tasks.csv, row 4 (line 5), cpu_cores: must be > 0 (got -2)`.
 
 Task files use the columns in [examples/tasks_sample.csv](examples/tasks_sample.csv); leave `id` blank to number tasks automatically. Details in [docs/SPEC.md §3a](docs/SPEC.md).

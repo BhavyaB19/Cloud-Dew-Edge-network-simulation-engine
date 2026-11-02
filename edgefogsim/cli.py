@@ -123,6 +123,7 @@ class App:
             ("Results", [
                 ("Export results (CSV, JSON, charts)", self.export),
                 ("Change a node and compare before/after (admin)", self.before_after),
+                ("Run all four experiments (admin)", self.experiments),
             ]),
             ("Settings", [
                 ("View settings", self.show_settings),
@@ -333,7 +334,7 @@ class App:
     def before_after(self) -> None:
         """Admin only: change one node field, re-run the workload and compare the results; optionally keep it."""
         if not self.user.is_admin:
-            self.console.print("[red]Only the admin can change nodes. Switch user (option 19) to admin.[/red]")
+            self.console.print("[red]Only the admin can change nodes. Switch user (option 20) to admin.[/red]")
             return
         if not self._has_tasks():
             return
@@ -356,6 +357,19 @@ class App:
             set_node_value(self.settings, node_id, key, value)
             self.last_run = result.after
             self.console.print(f"[green]Kept: {result.change}. Later runs use the changed node.[/green]")
+
+    def experiments(self) -> None:
+        """Admin only: run E1-E4 from ``config/experiments.json`` and show where the write-up is."""
+        if not self.user.is_admin:
+            self.console.print("[red]Only the admin can run the experiments. Switch user (option 20) to admin.[/red]")
+            return
+        from edgefogsim.experiments import load_experiments, run_all
+
+        self.console.print("Running E1-E4...")
+        try:
+            print_experiments(self.console, run_all(self.settings, load_experiments()))
+        except ConfigError as exc:
+            self.console.print(f"[red]{exc}[/red]")
 
     def _print_files(self, title: str, folder, files: dict) -> None:
         """List the files an export wrote."""
@@ -441,7 +455,7 @@ class App:
         for path, value, source in describe_settings(self.settings):
             table.add_row(path, str(value), source)
         self.console.print(table)
-        self.console.print("[dim]Change any of these with option 17, a --config file, or --set KEY=VALUE.[/dim]")
+        self.console.print("[dim]Change any of these with option 18, a --config file, or --set KEY=VALUE.[/dim]")
 
     def change_setting(self) -> None:
         """Ask for a dotted setting and a new value, validate and apply it; print any error."""
@@ -643,3 +657,25 @@ def _value(value: float | int | None, share: bool) -> str:
     if share:
         return f"{value:.0%}"
     return f"{value:.1f}" if isinstance(value, float) else str(value)
+
+
+def print_experiments(console: Console, run) -> None:
+    """Print one row per experiment (result and checks) and the path of ``experiments.md``.
+
+    Args:
+        console: Where to print.
+        run: An :class:`edgefogsim.experiments.ExperimentRun`.
+    """
+    table = Table(title="Experiments")
+    for column in ("Experiment", "Result", "Checks held"):
+        table.add_column(column)
+    for e in run.experiments:
+        result = "[green]as expected[/green]" if e.passed else "[red]differs from expected[/red]"
+        table.add_row(f"{e.key} {e.title}", result, f"{sum(h for _, h in e.checks)} / {len(e.checks)}")
+    console.print(table)
+    for e in run.experiments:
+        for statement, held in e.checks:
+            console.print(f"  {'[green]✓[/green]' if held else '[red]✗[/red]'} {e.key}: {statement}")
+    console.print(f"[green]Write-up: {run.report}[/green]")
+    console.print(f"[dim]Evidence (CSV, JSON, PNG, logs) in {run.folder}/E1 ... E4[/dim]")
+
