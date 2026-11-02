@@ -41,7 +41,7 @@ def test_welcome_screen_before_login(monkeypatch):
 def test_every_page_loads_for_tenant_and_admin(monkeypatch, user):
     """AC25: every page renders without an exception for a tenant and for the admin."""
     at = open_app(monkeypatch, user=user)
-    for page in ("Nodes", "Workload", "Placement", "VMs", "Security", "Settings"):
+    for page in ("Nodes", "Workload", "Placement", "VMs", "Security", "Results", "Settings"):
         at.sidebar.radio(key="page").set_value(page).run()
         assert not at.exception, f"{page} page failed for {user}"
         assert at.header[0].value == {"VMs": "Virtual machines"}.get(page, page)
@@ -212,3 +212,32 @@ def test_vms_page_create_vm_then_task_joins_it(monkeypatch):
     at.selectbox(key="place_task_id").set_value("T01").run()
     at = click(at, "Place")
     assert "joined vm-0001" in at.success[0].value
+
+
+def test_results_page_shows_charts_and_saves(monkeypatch, tmp_path):
+    """After a run and a comparison, the Results page draws charts and saves both to the results folder."""
+    at = load_and_run(open_app(monkeypatch, user="admin"))
+    at = click(at, "Compare all policies")
+    at.sidebar.radio(key="page").set_value("Results").run()
+    assert not at.exception
+    at = click(at, "Save run to results folder")
+    at = click(at, "Save comparison to results folder")
+    names = {p.name for p in (tmp_path / "results").rglob("*")}
+    assert {"decisions.csv", "node_usage.png", "comparison.csv", "outcomes.png"} <= names
+
+
+def test_results_page_before_after_and_keep(monkeypatch):
+    """The admin compares a doubled edge-1 and keeps the change."""
+    at = load_and_run(open_app(monkeypatch, user="admin"))
+    at.sidebar.radio(key="page").set_value("Results").run()
+    at = click(at, "Compare")
+    assert at.session_state.before_after.change == "edge-1 cpu_cores 4 → 8"
+    at = click(at, "Keep this change")
+    assert next(n for n in at.session_state.settings.nodes if n.id == "edge-1").cpu_cores == 8
+
+
+def test_results_page_hides_node_change_from_tenants(monkeypatch):
+    """Tenants see the results but not the node-change form."""
+    at = load_and_run(open_app(monkeypatch, user="hospital-a"))
+    at.sidebar.radio(key="page").set_value("Results").run()
+    assert "Only the admin can change nodes." in [c.value for c in at.caption]

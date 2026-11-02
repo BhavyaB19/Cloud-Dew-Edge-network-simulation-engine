@@ -63,6 +63,9 @@ DEFAULT_SIMULATION: dict[str, Any] = {
     "security": {
         "audit_log": "results/audit.log",
     },
+    "output": {
+        "dir": "results",
+    },
     "qlearning": {
         "alpha": 0.1,
         "gamma": 0.9,
@@ -111,7 +114,7 @@ class Settings:
 
     Attributes:
         simulation: Nested dict shaped like ``config/simulation.json``
-            (``generator``, ``qos``, ``policy``, ``vm``, ``security``, ``qlearning``).
+            (``generator``, ``qos``, ``policy``, ``vm``, ``security``, ``output``, ``qlearning``).
         nodes: The nodes to simulate, with live usage starting at zero.
         tenants: Everyone who can log in.
         sources: Every layer that contributed, lowest precedence first.
@@ -206,6 +209,7 @@ def load_settings(
             nodes_raw, nodes_source = data.pop("nodes"), str(config_file)
         if "tenants" in data:
             tenants_raw, tenants_source = data.pop("tenants"), str(config_file)
+        data.pop("sources", None)  # informational list written by save_settings
         _merge(simulation, data, "", str(config_file), origins)
         sources.append(str(config_file))
 
@@ -223,6 +227,60 @@ def load_settings(
     settings = Settings(simulation, nodes, tenants, sources, origins)
     validate_simulation(settings)
     return settings
+
+
+NODE_EDITABLE = ("cpu_cores", "memory_gb", "base_latency_ms", "speed_factor")
+"""Node fields that can be changed after loading (id and tier stay fixed)."""
+
+
+def with_node_changes(settings: Settings, changes: dict[str, dict[str, Any]],
+                      source: str = "menu") -> Settings:
+    """A copy of the settings with some node fields changed; the original is untouched.
+
+    Used for before/after comparisons: run once with ``settings``, once with the copy.
+
+    Args:
+        settings: The current settings.
+        changes: Node id -> {field: new value}, e.g. ``{"edge-1": {"cpu_cores": 8}}``.
+            Fields must be in ``NODE_EDITABLE``.
+        source: Label used in error messages.
+
+    Returns:
+        New settings sharing everything except the changed nodes.
+
+    Raises:
+        ConfigError: For an unknown node or field, or an invalid value.
+    """
+    definitions = [_node_definition(n) for n in settings.nodes]
+    known = {d["id"] for d in definitions}
+    for node_id, fields in changes.items():
+        if node_id not in known:
+            raise ConfigError(source, node_id, f"unknown node; expected one of {', '.join(sorted(known))}")
+        for key in fields:
+            if key not in NODE_EDITABLE:
+                raise ConfigError(source, f"{node_id}.{key}", f"can't be changed; editable: {', '.join(NODE_EDITABLE)}")
+    for definition in definitions:
+        definition.update(changes.get(definition["id"], {}))
+    nodes = parse_nodes(definitions, source)
+    return Settings(settings.simulation, nodes, settings.tenants, settings.sources, settings.origins)
+
+
+def set_node_value(settings: Settings, node_id: str, key: str, value: Any, source: str = "menu") -> None:
+    """Change one node field in place (admin node editing); on any error nothing changes.
+
+    Args:
+        settings: The settings to change.
+        node_id: The node, e.g. ``"edge-1"``.
+        key: One of ``NODE_EDITABLE``.
+        value: The new value.
+        source: Recorded in ``sources`` and used in error messages.
+
+    Raises:
+        ConfigError: For an unknown node or field, or an invalid value.
+    """
+    settings.nodes = with_node_changes(settings, {node_id: {key: value}}, source).nodes
+    if source not in settings.sources:
+        settings.sources.append(source)
 
 
 def set_value(settings: Settings, dotted: str, value: Any, source: str = "menu") -> None:
@@ -506,6 +564,10 @@ def validate_simulation(settings: Settings) -> None:
     audit_log = settings.get("security.audit_log")
     if not isinstance(audit_log, str) or not audit_log.strip():
         fail("security.audit_log", "must be a file path")
+
+    out_dir = settings.get("output.dir")
+    if not isinstance(out_dir, str) or not out_dir.strip():
+        fail("output.dir", "must be a folder path")
 
     number("qlearning.alpha", minimum=0, maximum=1, inclusive_min=False)
     number("qlearning.gamma", minimum=0, maximum=1)

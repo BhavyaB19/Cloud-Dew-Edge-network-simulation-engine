@@ -27,20 +27,35 @@ import pandas as pd  # noqa: E402  (must follow the sys.path fix above)
 import streamlit as st  # noqa: E402
 
 from edgefogsim.__main__ import WEB_ARGS_ENV, build_parser, prepare  # noqa: E402
+import matplotlib.pyplot as plt  # noqa: E402
+
+from edgefogsim import charts  # noqa: E402
 from edgefogsim.config import (  # noqa: E402
+    NODE_EDITABLE,
     ConfigError,
     Settings,
     describe_settings,
     load_settings,
     parse_value,
+    set_node_value,
     set_value,
     settings_as_json,
 )
 from edgefogsim.models import SENSITIVITIES, Node, Tenant  # noqa: E402
 from edgefogsim.policies import POLICIES  # noqa: E402
 from edgefogsim.security import AccessDenied, AuditLog, find_task, find_vm, visible  # noqa: E402
+from edgefogsim.results import (  # noqa: E402
+    decisions_table,
+    export_before_after,
+    export_comparison,
+    export_run,
+    new_export_dir,
+    summary_table,
+)
 from edgefogsim.simulator import (  # noqa: E402
+    BeforeAfter,
     RunResult,
+    compare_before_after,
     compare_policies,
     create_vm,
     empty_cluster,
@@ -50,7 +65,7 @@ from edgefogsim.simulator import (  # noqa: E402
 from edgefogsim.workload import generate_tasks, load_tasks, make_task  # noqa: E402
 
 # Pages in the sidebar, in order. Later phases add Results, VMs and more.
-PAGES = ("Nodes", "Workload", "Placement", "VMs", "Security", "Settings")
+PAGES = ("Nodes", "Workload", "Placement", "VMs", "Security", "Results", "Settings")
 
 # Sample task file offered on the Workload page.
 SAMPLE_TASKS = ROOT / "examples" / "tasks_sample.csv"
@@ -75,6 +90,7 @@ def init_state() -> None:
     st.session_state.tasks = tasks
     st.session_state.last_run = None
     st.session_state.comparison = None
+    st.session_state.before_after = None
 
 
 def sidebar(settings: Settings) -> tuple[Tenant | None, str, "st.delta_generator.DeltaGenerator"]:
@@ -181,7 +197,7 @@ def placement_page(settings: Settings, user: Tenant) -> None:
         decimals = {c: st.column_config.NumberColumn(c, format="%.1f") for c in ("Avg ms", "P95 ms")}
         st.dataframe(frame, hide_index=True, width="stretch", column_config={**percent, **decimals})
         st.bar_chart(frame.set_index("Policy")[["On time", "Late", "Rejected"]],
-                     color=["#2e9e5b", "#e0a526", "#d64545"], stack=True, horizontal=True)
+                     color=list(charts.OUTCOME_COLORS.values()), stack=True, horizontal=True)
 
     run: RunResult | None = st.session_state.last_run
     if run:
@@ -456,9 +472,102 @@ def main() -> None:
         vms_page(settings, user)
     elif page == "Security":
         security_page(settings, user)
+    elif page == "Results":
+        results_page(settings, user)
     else:
         settings_page(st.session_state.settings)
     task_count.caption(f"{len(st.session_state.tasks)} tasks loaded")
+
+
+def results_page(settings: Settings, user: Tenant) -> None:
+    """Charts and exports for the last run and comparison, plus the admin's before/after node change.
+
+    Args:
+        settings: Current settings; supplies ``output.dir`` and is changed if a node change is kept.
+        user: Who is logged in; a tenant's exports contain only their own decisions and VMs.
+    """
+    st.header("Results")
+    run: RunResult | None = st.session_state.last_run
+    comparison: list[RunResult] | None = st.session_state.comparison
+    if not run and not comparison:
+        st.info("Nothing to show yet. Run a policy or compare policies on the Placement page.")
+
+    if comparison:
+        st.subheader("Policy comparison")
+        st.dataframe(summary_table(comparison), hide_index=True, width="stretch")
+        col1, col2 = st.columns(2)
+        _show(col1, charts.outcomes_chart(comparison))
+        _show(col2, charts.tiers_chart(comparison))
+        _show(st, charts.latency_chart(comparison))
+        col1, col2 = st.columns(2)
+        col1.download_button("Download comparison.csv", summary_table(comparison).to_csv(index=False),
+                             file_name="comparison.csv", mime="text/csv", key="dl_comparison")
+        if col2.button("Save comparison to results folder", key="save_comparison"):
+            folder = new_export_dir(settings, "comparison")
+            export_comparison(comparison, settings, folder)
+            charts.save_comparison_charts(comparison, folder)
+            st.success(f"Saved to {folder}/")
+
+    if run and run.decisions:
+        st.subheader(f"Last run: {run.label}")
+        col1, col2 = st.columns(2)
+        _show(col1, charts.node_usage_chart(run))
+        _show(col2, charts.latency_chart([run]))
+        col1, col2, col3 = st.columns(3)
+        col1.download_button("Download decisions.csv", decisions_table(run, user).to_csv(index=False),
+                             file_name="decisions.csv", mime="text/csv", key="dl_decisions")
+        col2.download_button("Download summary.json", json.dumps({"policy": run.label, **run.summary()}, indent=2),
+                             file_name="summary.json", mime="application/json", key="dl_summary")
+        if col3.button("Save run to results folder", key="save_run"):
+            folder = new_export_dir(settings, run.policy)
+            export_run(run, settings, folder, viewer=user)
+            charts.save_run_charts(run, folder)
+            st.success(f"Saved to {folder}/")
+
+    st.subheader("Change a node and compare before / after")
+    if not user.is_admin:
+        st.caption("Only the admin can change nodes.")
+        return
+    if not st.session_state.tasks:
+        st.caption("Build a workload first.")
+        return
+    with st.form("before_after_form"):
+        col1, col2, col3, col4 = st.columns(4)
+        node_id = col1.selectbox("Node", [n.id for n in settings.nodes], key="ba_node")
+        key = col2.selectbox("Field", NODE_EDITABLE, key="ba_field")
+        current = getattr(next(n for n in settings.nodes if n.id == node_id), key)
+        value = col3.number_input("New value", min_value=0.0, value=float(current) * 2, step=1.0, key="ba_value")
+        keys = list(POLICIES)
+        policy = col4.selectbox("Policy", keys, index=keys.index("capacity"), key="ba_policy",
+                                format_func=lambda k: POLICIES[k].label)
+        if st.form_submit_button("Compare"):
+            try:
+                st.session_state.before_after = compare_before_after(
+                    settings, st.session_state.tasks, policy, {node_id: {key: value}})
+                st.session_state.before_after_key = (node_id, key, value)
+            except ConfigError as exc:
+                st.error(str(exc))
+    result: BeforeAfter | None = st.session_state.before_after
+    if result:
+        st.dataframe(pd.DataFrame(result.diff()), hide_index=True, width="stretch")
+        _show(st, charts.before_after_chart(result.before, result.after, result.change))
+        col1, col2 = st.columns(2)
+        if col1.button("Save before/after to results folder", key="save_before_after"):
+            folder = new_export_dir(settings, "before-after")
+            export_before_after(result, settings, folder)
+            charts.save_before_after_chart(result.before, result.after, result.change, folder)
+            st.success(f"Saved to {folder}/")
+        if col2.button("Keep this change", key="keep_change"):
+            node_id, key, value = st.session_state.before_after_key
+            set_node_value(settings, node_id, key, value, source="web app")
+            st.session_state.last_run = result.after
+            st.success(f"Kept: {result.change}. Later runs use the changed node.")
+
+
+def _show(where, fig) -> None:
+    """Draw a matplotlib figure in the app, then free it."""
+    where.pyplot(fig)
+    plt.close(fig)
 
 
 def _stale_warning(run: RunResult, tasks: list) -> None:

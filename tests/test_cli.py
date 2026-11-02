@@ -26,14 +26,14 @@ def test_menu_login_view_nodes_generate_and_list(settings):
 
 def test_menu_change_setting_then_generate_uses_it(settings):
     """A setting changed in the menu is used by the next generation."""
-    out = run_menu(settings, ["admin", "15", "generator.count", "3", "2", "", "", "0"])
+    out = run_menu(settings, ["admin", "17", "generator.count", "3", "2", "", "", "0"])
     assert "generator.count = 3" in out
     assert "Generated 3 tasks" in out
 
 
 def test_menu_reports_bad_setting_without_crashing(settings):
     """An invalid menu edit prints the reason and the menu carries on."""
-    out = run_menu(settings, ["1", "15", "qos.deadlines_ms.high", "-1", "0"])
+    out = run_menu(settings, ["1", "17", "qos.deadlines_ms.high", "-1", "0"])
     assert "qos.deadlines_ms.high" in out and "must be > 0" in out
 
 
@@ -117,3 +117,26 @@ def test_menu_tenant_cannot_stop_another_tenants_vm(settings):
     out = run_menu(settings, ["hospital-b", "3", "", "6", "", "10", "vm-0001", "8", "0"])
     assert "ACCESS DENIED: hospital-b may not access VM vm-0001" in out
     assert "vm-0001" not in out.split("Your VMs")[-1]
+
+
+def test_menu_export_writes_run_and_comparison(settings, tmp_path):
+    """Exporting after a run and a comparison writes both folders with CSV, JSON and charts."""
+    out = run_menu(settings, ["admin", "3", "", "6", "", "7", "14", "0"])
+    assert "Run (Capacity-Aware) saved to" in out and "Policy comparison saved to" in out
+    names = {p.name for p in (tmp_path / "results").rglob("*")}
+    assert {"decisions.csv", "summary.json", "vms.csv", "nodes.csv", "settings_used.json",
+            "node_usage.png", "comparison.csv", "outcomes.png", "tiers.png"} <= names
+
+
+def test_menu_before_after_and_keep(settings):
+    """The admin compares edge-1 with 8 cores, keeps it, and the node really changes."""
+    out = run_menu(settings, ["admin", "2", "20", "", "15", "edge-1", "cpu_cores", "8", "", "y", "1", "0"])
+    assert "Before / after: edge-1 cpu_cores 4 → 8" in out
+    assert "Kept: edge-1 cpu_cores 4 → 8" in out
+    assert next(n for n in settings.nodes if n.id == "edge-1").cpu_cores == 8
+
+
+def test_menu_before_after_is_admin_only(settings):
+    """A tenant can't change nodes."""
+    out = run_menu(settings, ["hospital-a", "15", "0"])
+    assert "Only the admin can change nodes" in out

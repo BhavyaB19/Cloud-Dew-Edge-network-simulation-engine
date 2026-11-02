@@ -13,13 +13,16 @@ from rich import box
 from rich.console import Console
 from rich.table import Table
 
+from edgefogsim import charts
 from edgefogsim.config import (
     CONFIG_DIR,
+    NODE_EDITABLE,
     ConfigError,
     Settings,
     describe_settings,
     parse_value,
     save_settings,
+    set_node_value,
     set_value,
 )
 from edgefogsim.models import Node, Task, Tenant
@@ -28,14 +31,16 @@ from edgefogsim.security import AccessDenied, AuditLog, authorize, find_task, fi
 from edgefogsim.simulator import (
     LATE,
     ON_TIME,
+    BeforeAfter,
     RunResult,
+    compare_before_after,
     compare_policies,
     create_vm,
     empty_cluster,
     run_workload,
     submit,
 )
-from edgefogsim.vm_manager import CapacityError
+from edgefogsim.results import export_before_after, export_comparison, export_run, new_export_dir
 from edgefogsim.workload import generate_tasks, load_tasks, make_task
 
 SENSITIVITY_STYLE = {"high": "bold red", "medium": "yellow", "low": "green"}
@@ -62,6 +67,7 @@ class App:
         user: Who is logged in, or None before login.
         last_run: The live cluster from the most recent placement run (nodes,
             VMs, decisions), or None. Stopping VMs and placing single tasks act on it.
+        last_comparison: The most recent "compare all policies" results, or None.
     """
 
     def __init__(self, settings: Settings, tasks: list[Task] | None = None,
@@ -81,6 +87,7 @@ class App:
         self.ask = ask or self.console.input
         self.user: Tenant | None = None
         self.last_run: RunResult | None = None
+        self.last_comparison: list[RunResult] | None = None
 
     @property
     def audit(self) -> AuditLog:
@@ -112,6 +119,10 @@ class App:
             ("Security", [
                 ("Look up a task or VM by id", self.lookup),
                 ("View audit log", self.show_audit),
+            ]),
+            ("Results", [
+                ("Export results (CSV, JSON, charts)", self.export),
+                ("Change a node and compare before/after (admin)", self.before_after),
             ]),
             ("Settings", [
                 ("View settings", self.show_settings),
@@ -178,7 +189,9 @@ class App:
         """Run the workload through every policy on fresh nodes and print the results side by side."""
         if not self._has_tasks():
             return
-        print_comparison(self.console, compare_policies(self.settings, self.tasks))
+        self.last_comparison = compare_policies(self.settings, self.tasks)
+        print_comparison(self.console, self.last_comparison)
+        self.console.print("[dim]Export the table and charts with option 14.[/dim]")
 
     def show_vms(self) -> None:
         """Print the VMs the user may see (their own; all for an admin)."""
@@ -298,6 +311,58 @@ class App:
             table.add_row(e["timestamp"], e["actor"], e["target_tenant"], e["resource"], f"[red]{e['outcome']}[/red]")
         self.console.print(table)
 
+    def export(self) -> None:
+        """Save the last run and the last policy comparison as CSV, JSON and PNG charts.
+
+        A tenant's run export contains only their own decisions and VMs.
+        """
+        if not self.last_run and not self.last_comparison:
+            self.console.print("Nothing to export yet. Run placement (option 6) or compare policies (option 7).")
+            return
+        if self.last_run and self.last_run.decisions:
+            folder = new_export_dir(self.settings, self.last_run.policy)
+            files = export_run(self.last_run, self.settings, folder, viewer=self.user)
+            files.update(charts.save_run_charts(self.last_run, folder))
+            self._print_files(f"Run ({self.last_run.label})", folder, files)
+        if self.last_comparison:
+            folder = new_export_dir(self.settings, "comparison")
+            files = export_comparison(self.last_comparison, self.settings, folder)
+            files.update(charts.save_comparison_charts(self.last_comparison, folder))
+            self._print_files("Policy comparison", folder, files)
+
+    def before_after(self) -> None:
+        """Admin only: change one node field, re-run the workload and compare the results; optionally keep it."""
+        if not self.user.is_admin:
+            self.console.print("[red]Only the admin can change nodes. Switch user (option 19) to admin.[/red]")
+            return
+        if not self._has_tasks():
+            return
+        node_ids = [n.id for n in self.settings.nodes]
+        node_id = self.ask(f"Node ({', '.join(node_ids)}): ").strip()
+        key = self.ask(f"Field ({', '.join(NODE_EDITABLE)}): ").strip()
+        value = parse_value(self.ask("New value: ").strip())
+        policy = self._ask_policy()
+        try:
+            result = compare_before_after(self.settings, self.tasks, policy, {node_id: {key: value}})
+        except ConfigError as exc:
+            self.console.print(f"[red]{exc}[/red]")
+            return
+        print_before_after(self.console, result)
+        folder = new_export_dir(self.settings, "before-after")
+        files = export_before_after(result, self.settings, folder)
+        files["chart"] = charts.save_before_after_chart(result.before, result.after, result.change, folder)
+        self._print_files("Before/after", folder, files)
+        if self.ask("Keep this change for the rest of the session? (y/N): ").strip().lower() == "y":
+            set_node_value(self.settings, node_id, key, value)
+            self.last_run = result.after
+            self.console.print(f"[green]Kept: {result.change}. Later runs use the changed node.[/green]")
+
+    def _print_files(self, title: str, folder, files: dict) -> None:
+        """List the files an export wrote."""
+        self.console.print(f"[green]{title} saved to {folder}/[/green]")
+        for path in files.values():
+            self.console.print(f"  [dim]{path.name}[/dim]")
+
     def generate(self) -> None:
         """Ask for a count and seed, then replace the workload with random tasks."""
         gen = self.settings.simulation["generator"]
@@ -376,7 +441,7 @@ class App:
         for path, value, source in describe_settings(self.settings):
             table.add_row(path, str(value), source)
         self.console.print(table)
-        self.console.print("[dim]Change any of these with option 15, a --config file, or --set KEY=VALUE.[/dim]")
+        self.console.print("[dim]Change any of these with option 17, a --config file, or --set KEY=VALUE.[/dim]")
 
     def change_setting(self) -> None:
         """Ask for a dotted setting and a new value, validate and apply it; print any error."""
@@ -546,3 +611,35 @@ def _print_summary_line(console: Console, result: RunResult) -> None:
 def _ms(value: float | None, decimals: int = 1) -> str:
     """Format milliseconds (one decimal by default), or "-" when there is no value."""
     return "-" if value is None else f"{value:.{decimals}f}"
+
+
+def print_before_after(console: Console, result: BeforeAfter) -> None:
+    """Print a before/after comparison as a table of metrics with the change for each.
+
+    Args:
+        console: Where to print.
+        result: The two runs and the change.
+    """
+    table = Table(title=f"Before / after: {result.change} ({result.after.label})")
+    for column in ("Metric", "Before", "After", "Change"):
+        table.add_column(column, justify="left" if column == "Metric" else "right")
+    for row in result.diff():
+        share = row["metric"] == "success_rate" or row["metric"].endswith((" util", " load"))
+        change = row["change"]
+        if change is None or abs(change) < 1e-9:
+            delta = "[dim]-[/dim]"
+        elif share:
+            delta = f"{change:+.0%}"
+        else:
+            delta = f"{change:+.1f}" if isinstance(change, float) else f"{change:+d}"
+        table.add_row(row["metric"].replace("_", " "), _value(row["before"], share), _value(row["after"], share), delta)
+    console.print(table)
+
+
+def _value(value: float | int | None, share: bool) -> str:
+    """Format a metric: a percentage for shares, one decimal for other floats, as-is for counts."""
+    if value is None:
+        return "-"
+    if share:
+        return f"{value:.0%}"
+    return f"{value:.1f}" if isinstance(value, float) else str(value)

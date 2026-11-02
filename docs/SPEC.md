@@ -236,6 +236,7 @@ The resolved settings are printed at start-up and written into every results fol
 | Policy | `simulation.json` → `policy` | `headroom` (0.85), `tier_preference` per sensitivity, `soft_overload_retry` (true), `capacity_weights` (`tier` 0.5, `slack` 0.3, `free` 0.2), `topsis_weights` (`latency` 0.5, `cpu` 0.3, `memory` 0.2) |
 | VMs | `simulation.json` → `vm` | `sizes` per tier: edge 2 CPU / 4 GB, fog 4 / 8, cloud 8 / 16 |
 | Security | `simulation.json` → `security` | `audit_log` (`results/audit.log`) |
+| Output | `simulation.json` → `output` | `dir` (`results`): where exports are written |
 | Q-learning | `simulation.json` → `qlearning` | `alpha` (0.1), `gamma` (0.9), `epsilon` (0.2), `episodes` (500), `train_seed` (1000) |
 | Tenants | `tenants.json` | list of `{tenant_id, role}` |
 | Experiments | `experiments.json` | per experiment: workload source, seed, node overrides, policies to compare |
@@ -271,8 +272,11 @@ python -m edgefogsim
      Security
       12. Look up a task or VM by id → ACCESS DENIED + audit entry if not yours
       13. View audit log (own attempts; all for admin)
+     Results
+      14. Export results → CSV, JSON and PNG charts in results/<time>-<name>/
+      15. [admin] Change a node and compare before/after → diff table + chart; optionally keep it
      Settings
-      14. View settings   15. Change a setting   16. Save settings   17. Switch user
+      16. View settings   17. Change a setting   18. Save settings   19. Switch user
        0. Exit
 ```
 

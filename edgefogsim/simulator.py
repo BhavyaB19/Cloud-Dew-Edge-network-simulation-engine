@@ -307,3 +307,58 @@ def create_vm(result: RunResult, tenant_id: str, node_id: str,
     return result.vms.create(tenant_id, node,
                              cpu_cores if cpu_cores is not None else default.get("cpu_cores", 1),
                              memory_gb if memory_gb is not None else default.get("memory_gb", 1))
+
+
+@dataclass
+class BeforeAfter:
+    """The same workload and policy run before and after a node change.
+
+    Attributes:
+        change: What changed, in words, e.g. ``"edge-1 cpu_cores 4 → 8"``.
+        before: The run with the original nodes.
+        after: The run with the changed nodes.
+    """
+
+    change: str
+    before: RunResult
+    after: RunResult
+
+    def diff(self) -> list[dict[str, object]]:
+        """Headline numbers side by side.
+
+        Returns:
+            One dict per metric with ``metric``, ``before``, ``after`` and
+            ``change`` (after minus before; None where either is missing).
+        """
+        b, a = self.before.summary(), self.after.summary()
+        rows = []
+        for key in b:
+            if key in a and key != "total":
+                change = None if b[key] is None or a[key] is None else a[key] - b[key]
+                rows.append({"metric": key, "before": b[key], "after": a[key], "change": change})
+        return rows
+
+
+def compare_before_after(settings: Settings, tasks: list[Task], policy_key: str,
+                         changes: dict[str, dict[str, float]]) -> BeforeAfter:
+    """Run a workload with the current nodes and again with some nodes changed.
+
+    Args:
+        settings: Current settings (not modified).
+        tasks: The workload.
+        policy_key: Policy used for both runs.
+        changes: Node id -> {field: new value}, e.g. ``{"cloud-1": {"base_latency_ms": 150}}``.
+
+    Returns:
+        Both runs and a description of the change.
+
+    Raises:
+        ConfigError: For an unknown node or field, or an invalid value.
+    """
+    from edgefogsim.config import with_node_changes
+
+    changed = with_node_changes(settings, changes)
+    old = {n.id: n for n in settings.nodes}
+    words = ", ".join(f"{node_id} {key} {getattr(old[node_id], key):g} → {value:g}"
+                      for node_id, fields in changes.items() for key, value in fields.items())
+    return BeforeAfter(words, run_workload(settings, tasks, policy_key), run_workload(changed, tasks, policy_key))
