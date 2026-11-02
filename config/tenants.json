@@ -1,0 +1,7 @@
+{
+  "tenants": [
+    {"tenant_id": "hospital-a", "role": "tenant"},
+    {"tenant_id": "hospital-b", "role": "tenant"},
+    {"tenant_id": "admin",      "role": "admin"}
+  ]
+}

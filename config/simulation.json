@@ -1,0 +1,33 @@
+{
+  "generator": {
+    "count": 12,
+    "seed": 42,
+    "cpu_range": [1, 8],
+    "memory_range": [0.5, 16],
+    "work_range": [2, 40],
+    "sensitivity_mix": {"high": 0.4, "medium": 0.3, "low": 0.3},
+    "tenant_mix": {"hospital-a": 0.5, "hospital-b": 0.5}
+  },
+  "qos": {
+    "deadlines_ms": {"high": 25, "medium": 100, "low": 400},
+    "congestion_cap": 0.95
+  },
+  "policy": {
+    "headroom": 0.85,
+    "tier_preference": {
+      "high":   ["edge", "fog", "cloud"],
+      "medium": ["fog", "edge", "cloud"],
+      "low":    ["cloud", "fog", "edge"]
+    },
+    "soft_overload_retry": true,
+    "capacity_weights": {"tier": 0.5, "slack": 0.3, "free": 0.2},
+    "topsis_weights": {"latency": 0.5, "cpu": 0.3, "memory": 0.2}
+  },
+  "qlearning": {
+    "alpha": 0.1,
+    "gamma": 0.9,
+    "epsilon": 0.2,
+    "episodes": 500,
+    "train_seed": 1000
+  }
+}

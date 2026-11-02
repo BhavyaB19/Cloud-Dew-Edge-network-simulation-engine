@@ -1,0 +1,11 @@
+id,tenant_id,cpu_cores,memory_gb,sensitivity,work_units
+T01,hospital-a,2,1,high,4
+T02,hospital-a,2,1,high,4
+T03,hospital-b,8,16,low,40
+T04,hospital-b,20,8,high,4
+T05,hospital-b,1,0.5,medium,10
+T06,hospital-a,4,4,medium,20
+T07,hospital-a,1,2,low,30
+T08,hospital-b,2,2,high,6
+T09,hospital-a,6,8,low,35
+T10,hospital-b,3,4,medium,15
