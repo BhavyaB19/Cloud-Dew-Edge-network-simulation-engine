@@ -1,0 +1,26 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from edgefogsim.config import load_settings
+
+ROOT = Path(__file__).resolve().parent.parent
+
+
+@pytest.fixture
+def settings():
+    """Settings from the project's default config/ folder."""
+    return load_settings()
+
+
+@pytest.fixture
+def write_json(tmp_path):
+    """Write a JSON file under tmp_path and return its path."""
+
+    def _write(name, data):
+        path = tmp_path / name
+        path.write_text(json.dumps(data))
+        return path
+
+    return _write
