@@ -1,0 +1,10 @@
+[project]
+name = "edgefogsim"
+version = "0.1.0"
+description = "Edge/Fog/Cloud task placement simulator (ARM 305 mini project)"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

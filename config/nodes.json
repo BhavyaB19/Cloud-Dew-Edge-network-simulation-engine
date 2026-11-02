@@ -1,0 +1,7 @@
+{
+  "nodes": [
+    {"id": "edge-1",  "tier": "edge",  "cpu_cores": 4,   "memory_gb": 8,   "base_latency_ms": 5,  "speed_factor": 0.6},
+    {"id": "fog-1",   "tier": "fog",   "cpu_cores": 16,  "memory_gb": 32,  "base_latency_ms": 20, "speed_factor": 1.0},
+    {"id": "cloud-1", "tier": "cloud", "cpu_cores": 128, "memory_gb": 512, "base_latency_ms": 80, "speed_factor": 2.0}
+  ]
+}

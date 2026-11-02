@@ -1,0 +1,28 @@
+{
+  "experiments": {
+    "E1_policy_comparison": {
+      "workload": {"generate": 20, "seed": 42},
+      "policies": ["latency", "capacity"],
+      "node_overrides": {}
+    },
+    "E2_overload": {
+      "workload": {"generate": 10, "seed": 7, "sensitivity_mix": {"high": 1.0, "medium": 0.0, "low": 0.0}},
+      "policies": ["capacity"],
+      "preload": {"edge-1": {"cpu_util": 0.9}},
+      "node_overrides": {}
+    },
+    "E3_unauthorised_access": {
+      "actor": "hospital-b",
+      "target_tenant": "hospital-a",
+      "workload": {"generate": 6, "seed": 42}
+    },
+    "E4_capacity_latency_change": {
+      "workload": {"generate": 20, "seed": 42},
+      "policies": ["capacity"],
+      "node_overrides": {
+        "edge-1": {"cpu_cores": 8},
+        "cloud-1": {"base_latency_ms": 150}
+      }
+    }
+  }
+}
