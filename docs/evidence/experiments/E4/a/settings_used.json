@@ -1,0 +1,151 @@
+{
+  "generator": {
+    "count": 12,
+    "seed": 42,
+    "cpu_range": [
+      1,
+      4
+    ],
+    "memory_range": [
+      0.5,
+      8
+    ],
+    "work_range": {
+      "high": [
+        1,
+        6
+      ],
+      "medium": [
+        5,
+        40
+      ],
+      "low": [
+        10,
+        100
+      ]
+    },
+    "sensitivity_mix": {
+      "high": 0.4,
+      "medium": 0.3,
+      "low": 0.3
+    },
+    "tenant_mix": {
+      "hospital-a": 0.5,
+      "hospital-b": 0.5
+    }
+  },
+  "qos": {
+    "deadlines_ms": {
+      "high": 25,
+      "medium": 100,
+      "low": 400
+    },
+    "congestion_cap": 0.95
+  },
+  "policy": {
+    "headroom": 0.85,
+    "tier_preference": {
+      "high": [
+        "edge",
+        "fog",
+        "cloud"
+      ],
+      "medium": [
+        "fog",
+        "edge",
+        "cloud"
+      ],
+      "low": [
+        "cloud",
+        "fog",
+        "edge"
+      ]
+    },
+    "soft_overload_retry": true,
+    "capacity_weights": {
+      "tier": 0.5,
+      "slack": 0.3,
+      "free": 0.2
+    },
+    "topsis_weights": {
+      "latency": 0.5,
+      "cpu": 0.3,
+      "memory": 0.2
+    }
+  },
+  "vm": {
+    "sizes": {
+      "edge": {
+        "cpu_cores": 2,
+        "memory_gb": 4
+      },
+      "fog": {
+        "cpu_cores": 4,
+        "memory_gb": 8
+      },
+      "cloud": {
+        "cpu_cores": 8,
+        "memory_gb": 16
+      }
+    }
+  },
+  "security": {
+    "audit_log": "results/audit.log"
+  },
+  "output": {
+    "dir": "results"
+  },
+  "qlearning": {
+    "alpha": 0.1,
+    "gamma": 0.9,
+    "epsilon": 0.2,
+    "episodes": 500,
+    "train_seed": 1000
+  },
+  "nodes": [
+    {
+      "id": "edge-1",
+      "tier": "edge",
+      "cpu_cores": 4,
+      "memory_gb": 8,
+      "base_latency_ms": 5,
+      "speed_factor": 0.6
+    },
+    {
+      "id": "fog-1",
+      "tier": "fog",
+      "cpu_cores": 16,
+      "memory_gb": 32,
+      "base_latency_ms": 20,
+      "speed_factor": 1.0
+    },
+    {
+      "id": "cloud-1",
+      "tier": "cloud",
+      "cpu_cores": 128,
+      "memory_gb": 512,
+      "base_latency_ms": 80,
+      "speed_factor": 2.0
+    }
+  ],
+  "tenants": [
+    {
+      "tenant_id": "hospital-a",
+      "role": "tenant"
+    },
+    {
+      "tenant_id": "hospital-b",
+      "role": "tenant"
+    },
+    {
+      "tenant_id": "admin",
+      "role": "admin"
+    }
+  ],
+  "sources": [
+    "built-in defaults",
+    "/Users/moksh/CDEF Projects/config/simulation.json",
+    "/Users/moksh/CDEF Projects/config/nodes.json",
+    "/Users/moksh/CDEF Projects/config/tenants.json"
+  ]
+}

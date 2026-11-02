@@ -1,0 +1,4 @@
+hospital-b → read task T01: ACCESS DENIED: hospital-b may not access task T01 (belongs to hospital-a)
+hospital-b → read VM vm-0001: ACCESS DENIED: hospital-b may not access VM vm-0001 (belongs to hospital-a)
+hospital-b → stop VM vm-0001: ACCESS DENIED: hospital-b may not access VM vm-0001 (belongs to hospital-a)
+admin → read task T01 and VM vm-0001: allowed

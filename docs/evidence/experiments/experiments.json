@@ -1,0 +1,133 @@
+[
+  {
+    "key": "E1",
+    "title": "Policy comparison",
+    "passed": true,
+    "checks": [
+      {
+        "statement": "Capacity-Aware places no task late (0 late)",
+        "held": true
+      },
+      {
+        "statement": "Capacity-Aware gets more tasks on time (11) than the best baseline (10)",
+        "held": true
+      },
+      {
+        "statement": "TOPSIS places no task late (0 late)",
+        "held": true
+      },
+      {
+        "statement": "TOPSIS gets more tasks on time (12) than the best baseline (10)",
+        "held": true
+      }
+    ],
+    "evidence": [
+      "E1/comparison.csv",
+      "E1/comparison.json",
+      "E1/outcomes.png",
+      "E1/tiers.png",
+      "E1/latency.png"
+    ]
+  },
+  {
+    "key": "E2",
+    "title": "Overload",
+    "passed": true,
+    "checks": [
+      {
+        "statement": "Capacity-Aware offloads at least one task (4 offloaded)",
+        "held": true
+      },
+      {
+        "statement": "Capacity-Aware rejects tasks no node can serve in time (6 rejected, each with a reason)",
+        "held": true
+      },
+      {
+        "statement": "Capacity-Aware places no task late (0 late)",
+        "held": true
+      },
+      {
+        "statement": "No node is ever allocated beyond its capacity",
+        "held": true
+      },
+      {
+        "statement": "Capacity-Aware gets at least as many tasks on time (4) as Latency-First (1, with 9 late)",
+        "held": true
+      }
+    ],
+    "evidence": [
+      "E2/decisions_latency.csv",
+      "E2/decisions_capacity.csv",
+      "E2/outcomes.png",
+      "E2/node_usage.png"
+    ]
+  },
+  {
+    "key": "E3",
+    "title": "Unauthorised tenant access",
+    "passed": true,
+    "checks": [
+      {
+        "statement": "All 3 attempts by hospital-b were refused (3 refused)",
+        "held": true
+      },
+      {
+        "statement": "The audit log has one line per refusal (3 lines)",
+        "held": true
+      },
+      {
+        "statement": "hospital-a's VM vm-0001 is still running",
+        "held": true
+      },
+      {
+        "statement": "The admin can read both records",
+        "held": true
+      }
+    ],
+    "evidence": [
+      "E3/access_attempts.txt",
+      "E3/audit.log"
+    ]
+  },
+  {
+    "key": "E4",
+    "title": "Node capacity and latency change",
+    "passed": true,
+    "checks": [
+      {
+        "statement": "edge-1 takes at least as many tasks (1 \u2192 2)",
+        "held": true
+      },
+      {
+        "statement": "At least as many tasks on time (11 \u2192 12)",
+        "held": true
+      },
+      {
+        "statement": "No more tasks rejected (9 \u2192 8)",
+        "held": true
+      },
+      {
+        "statement": "Tasks on cloud-1 are slower on average (104 \u2192 179 ms)",
+        "held": true
+      },
+      {
+        "statement": "Low-sensitivity tasks all still finish on time (4 / 4)",
+        "held": true
+      },
+      {
+        "statement": "No task runs late (late 0 \u2192 0)",
+        "held": true
+      }
+    ],
+    "evidence": [
+      "E4/a/before_after.csv",
+      "E4/a/before_after.png",
+      "E4/a/decisions_before.csv",
+      "E4/a/decisions_after.csv",
+      "E4/b/before_after.csv",
+      "E4/b/before_after.png",
+      "E4/b/decisions_before.csv",
+      "E4/b/decisions_after.csv"
+    ]
+  }
+]
