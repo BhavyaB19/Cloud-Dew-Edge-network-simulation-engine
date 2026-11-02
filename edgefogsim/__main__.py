@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="run a workload through a policy without the menu")
     run.add_argument(
         "--policy",
-        choices=["latency", "capacity"],
+        choices=["latency", "cloud", "capacity", "topsis", "qlearn"],
         default="capacity",
         help="placement policy (default: capacity)",
     )

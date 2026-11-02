@@ -19,6 +19,15 @@
       "medium": ["fog", "edge", "cloud"],
       "low":    ["cloud", "fog", "edge"]
     },
-    "soft_overload_retry": true
+    "soft_overload_retry": true,
+    "capacity_weights": {"tier": 0.5, "slack": 0.3, "free": 0.2},
+    "topsis_weights": {"latency": 0.5, "cpu": 0.3, "memory": 0.2}
+  },
+  "qlearning": {
+    "alpha": 0.1,
+    "gamma": 0.9,
+    "epsilon": 0.2,
+    "episodes": 500,
+    "train_seed": 1000
   }
 }
